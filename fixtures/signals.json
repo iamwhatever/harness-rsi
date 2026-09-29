@@ -1,0 +1,102 @@
+[
+  {
+    "id": "sig_20260101_0001",
+    "source": "slack:C0FAKE00001",
+    "links": ["https://example.com/fake/slack/1"],
+    "pain": "Background task is lost after closing the page",
+    "mentions": {"count": 7, "people": 5, "window_days": 14},
+    "layer": "real",
+    "testable": {"ok": true, "task": "Close the page mid-task; the result is visible on return"},
+    "dedup_of": null
+  },
+  {
+    "id": "sig_20260101_0002",
+    "source": "github:example-org/example-repo#101",
+    "links": ["https://example.com/fake/github/2"],
+    "pain": "Background task is lost after closing the page",
+    "mentions": {"count": 2, "people": 2, "window_days": 14},
+    "layer": "real",
+    "testable": {"ok": true, "task": "Close the page mid-task; the result is visible on return"},
+    "dedup_of": "sig_20260101_0001"
+  },
+  {
+    "id": "sig_20260101_0003",
+    "source": "session:chat-fake-0001",
+    "links": ["https://example.com/fake/session/3"],
+    "pain": "Agent retries the same failing command three times",
+    "mentions": {"count": 4, "people": 1, "window_days": 7},
+    "layer": "real",
+    "testable": {"ok": true, "task": "A failing command is not repeated verbatim more than once"},
+    "dedup_of": null
+  },
+  {
+    "id": "sig_20260101_0004",
+    "source": "trend:example-competitor-changelog",
+    "links": ["https://example.com/fake/trend/4"],
+    "pain": "Competitor offers one-step undo of file edits",
+    "mentions": {"count": 3, "people": 3, "window_days": 30},
+    "layer": "external",
+    "testable": {"ok": true, "task": "Break 3 files, restore them in one step"},
+    "dedup_of": null
+  },
+  {
+    "id": "sig_20260101_0005",
+    "source": "trend:example-blog",
+    "links": ["https://example.com/fake/trend/5"],
+    "pain": "First reply feels slow",
+    "mentions": {"count": 5, "people": 4, "window_days": 30},
+    "layer": "external",
+    "testable": {"ok": true, "task": "Same prompt 100 times, first-token p50 under 2s"},
+    "dedup_of": null
+  },
+  {
+    "id": "sig_20260101_0006",
+    "source": "slack:C0FAKE00001",
+    "links": ["https://example.com/fake/slack/6"],
+    "pain": "Settings page is hard to find",
+    "mentions": {"count": 2, "people": 2, "window_days": 10},
+    "layer": "real",
+    "testable": {"ok": false, "task": null},
+    "dedup_of": null
+  },
+  {
+    "id": "sig_20260101_0007",
+    "source": "github:example-org/example-repo#102",
+    "links": ["https://example.com/fake/github/7"],
+    "pain": "Error text shows a raw stack trace",
+    "mentions": {"count": 3, "people": 2, "window_days": 21},
+    "layer": "real",
+    "testable": {"ok": true, "task": "A backend error renders a plain sentence, no stack trace"},
+    "dedup_of": null
+  },
+  {
+    "id": "sig_20260101_0008",
+    "source": "session:chat-fake-0002",
+    "links": ["https://example.com/fake/session/8"],
+    "pain": "User stops the turn after a wrong file is edited",
+    "mentions": {"count": 2, "people": 1, "window_days": 5},
+    "layer": "real",
+    "testable": {"ok": true, "task": "Edits stay inside the named file"},
+    "dedup_of": null
+  },
+  {
+    "id": "sig_20260101_0009",
+    "source": "trend:example-forum",
+    "links": ["https://example.com/fake/trend/9"],
+    "pain": "Users like a visible task progress bar",
+    "mentions": {"count": 6, "people": 6, "window_days": 30},
+    "layer": "external",
+    "testable": {"ok": false, "task": null},
+    "dedup_of": null
+  },
+  {
+    "id": "sig_20260101_0010",
+    "source": "slack:C0FAKE00002",
+    "links": ["https://example.com/fake/slack/10"],
+    "pain": "Token use doubles on long threads",
+    "mentions": {"count": 3, "people": 3, "window_days": 14},
+    "layer": "real",
+    "testable": {"ok": true, "task": "Tokens per turn on a 50-turn thread stay under a threshold"},
+    "dedup_of": null
+  }
+]

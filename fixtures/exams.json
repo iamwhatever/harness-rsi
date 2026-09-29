@@ -1,0 +1,63 @@
+[
+  {
+    "id": "exam_bg_task_survives_close",
+    "layer": 2,
+    "origin": ["sig_20260101_0001"],
+    "visibility": "hidden",
+    "task": "Start a long task, close the page, reopen it",
+    "created_round": 1,
+    "used_rounds": [],
+    "check": {"kind": "exit_code", "cmd": ["python3", "exams/bg_task.py"], "expect": 0, "timeout_s": 600}
+  },
+  {
+    "id": "exam_undo_three_files",
+    "layer": 3,
+    "origin": ["sig_20260101_0004"],
+    "visibility": "regression",
+    "task": "Break 3 files, undo in one step",
+    "created_round": 1,
+    "used_rounds": [1, 2],
+    "check": {
+      "kind": "file_assert",
+      "path": "workspace/a.txt",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    }
+  },
+  {
+    "id": "exam_first_token_p50",
+    "layer": 1,
+    "origin": [],
+    "visibility": "regression",
+    "task": "Run the same prompt 100 times",
+    "created_round": 0,
+    "used_rounds": [0, 1, 2],
+    "check": {
+      "kind": "metric_threshold",
+      "metric": "first_token_ms",
+      "stat": "p50",
+      "op": "lt",
+      "value": 2000,
+      "runs": 100
+    }
+  },
+  {
+    "id": "exam_error_plain_sentence",
+    "layer": 2,
+    "origin": ["sig_20260101_0007"],
+    "visibility": "retired",
+    "task": "Trigger a backend error and read the page",
+    "created_round": 0,
+    "used_rounds": [0, 1, 2, 3],
+    "check": {"kind": "file_assert", "path": "out/error.txt", "contains": "Something went wrong"}
+  },
+  {
+    "id": "exam_board_unchanged",
+    "layer": 4,
+    "origin": ["sig_20260101_0006"],
+    "visibility": "regression",
+    "task": "Open the board with the app off",
+    "created_round": 0,
+    "used_rounds": [0],
+    "check": {"kind": "screenshot_diff", "baseline": "baseline/board.png", "max_diff_ratio": 0.01}
+  }
+]

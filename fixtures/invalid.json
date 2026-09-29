@@ -1,0 +1,51 @@
+[
+  {"name": "unknown layer", "schema": "signal", "base": {"file": "signals.json", "index": 0}, "path": ["layer"], "value": "internal"},
+  {"name": "missing links", "schema": "signal", "base": {"file": "signals.json", "index": 0}, "path": ["links"], "value": "__delete__"},
+  {"name": "empty links", "schema": "signal", "base": {"file": "signals.json", "index": 0}, "path": ["links"], "value": []},
+  {"name": "link is not https", "schema": "signal", "base": {"file": "signals.json", "index": 0}, "path": ["links"], "value": ["not a url"]},
+  {
+    "name": "source without a kind prefix",
+    "schema": "signal",
+    "base": {"file": "signals.json", "index": 0},
+    "path": ["source"],
+    "value": "C0FAKE00001"
+  },
+  {"name": "testable without a task", "schema": "signal", "base": {"file": "signals.json", "index": 0}, "path": ["testable", "task"], "value": null},
+  {"name": "malformed dedup id", "schema": "signal", "base": {"file": "signals.json", "index": 0}, "path": ["dedup_of"], "value": "sig_3"},
+  {"name": "unknown field", "schema": "signal", "base": {"file": "signals.json", "index": 0}, "path": ["extra"], "value": 1},
+  {"name": "layer out of range", "schema": "exam", "base": {"file": "exams.json", "index": 0}, "path": ["layer"], "value": 5},
+  {"name": "unknown visibility", "schema": "exam", "base": {"file": "exams.json", "index": 0}, "path": ["visibility"], "value": "public"},
+  {"name": "unknown check kind", "schema": "exam", "base": {"file": "exams.json", "index": 0}, "path": ["check", "kind"], "value": "llm_vibe"},
+  {"name": "exit_code without cmd", "schema": "exam", "base": {"file": "exams.json", "index": 0}, "path": ["check", "cmd"], "value": "__delete__"},
+  {"name": "hidden exam used twice", "schema": "exam", "base": {"file": "exams.json", "index": 0}, "path": ["used_rounds"], "value": [1, 2]},
+  {"name": "layer-2 exam without origin", "schema": "exam", "base": {"file": "exams.json", "index": 0}, "path": ["origin"], "value": []},
+  {
+    "name": "file_assert with nothing to assert",
+    "schema": "exam",
+    "base": {"file": "exams.json", "index": 1},
+    "path": ["check", "sha256"],
+    "value": "__delete__"
+  },
+  {"name": "unknown metric op", "schema": "exam", "base": {"file": "exams.json", "index": 2}, "path": ["check", "op"], "value": "eq"},
+  {"name": "diff ratio above 1", "schema": "exam", "base": {"file": "exams.json", "index": 4}, "path": ["check", "max_diff_ratio"], "value": 2},
+  {"name": "unknown decision", "schema": "proposal", "base": {"file": "proposals.json", "index": 0}, "path": ["decision"], "value": "maybe"},
+  {"name": "over the 10-file budget", "schema": "proposal", "base": {"file": "proposals.json", "index": 0}, "path": ["cost", "files"], "value": 11},
+  {"name": "over the 300-line budget", "schema": "proposal", "base": {"file": "proposals.json", "index": 0}, "path": ["cost", "lines"], "value": 301},
+  {"name": "no signals", "schema": "proposal", "base": {"file": "proposals.json", "index": 0}, "path": ["signal_ids"], "value": []},
+  {"name": "unknown verdict", "schema": "judge", "base": {"file": "judge.json", "index": null}, "path": ["output", "verdict"], "value": "meh"},
+  {
+    "name": "unknown suite in scores",
+    "schema": "judge",
+    "base": {"file": "judge.json", "index": null},
+    "path": ["output", "scores"],
+    "value": {"vibes": 1.0}
+  },
+  {"name": "no suites", "schema": "judge", "base": {"file": "judge.json", "index": null}, "path": ["input", "suites"], "value": []},
+  {
+    "name": "pair without ok",
+    "schema": "judge",
+    "base": {"file": "judge.json", "index": null},
+    "path": ["output", "paired_metrics", 0, "ok"],
+    "value": "__delete__"
+  }
+]

@@ -1,0 +1,32 @@
+[
+  {
+    "id": "prop_bg_tasks",
+    "pain": "Background task is lost after closing the page",
+    "signal_ids": ["sig_20260101_0001"],
+    "heat": {"people": 7, "window_days": 14},
+    "mock_artifact_slug": "fake-mock-bg-tasks",
+    "cost": {"files": 4, "lines": 180, "risks": ["session teardown"]},
+    "exam_ids": ["exam_bg_task_survives_close"],
+    "decision": null
+  },
+  {
+    "id": "prop_one_step_undo",
+    "pain": "No one-step undo of file edits",
+    "signal_ids": ["sig_20260101_0004"],
+    "heat": {"people": 3, "window_days": 30},
+    "mock_artifact_slug": null,
+    "cost": {"files": 8, "lines": 290, "risks": ["data loss on bad restore", "disk use"]},
+    "exam_ids": ["exam_undo_three_files"],
+    "decision": "later"
+  },
+  {
+    "id": "prop_plain_errors",
+    "pain": "Error text shows a raw stack trace",
+    "signal_ids": ["sig_20260101_0007"],
+    "heat": {"people": 2, "window_days": 21},
+    "mock_artifact_slug": "fake-mock-plain-errors",
+    "cost": {"files": 2, "lines": 40, "risks": []},
+    "exam_ids": ["exam_error_plain_sentence", "exam_first_token_p50"],
+    "decision": "do"
+  }
+]
