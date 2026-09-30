@@ -1,0 +1,22 @@
+{
+  "name": "harness-rsi",
+  "version": "0.1.0",
+  "displayName": "Harness RSI",
+  "description": "A priority board for harness self-improvement proposals: each card shows the pain and how many people hit it, the page before and the mock after, the change cost and the exams that will judge it, and three buttons to decide. A signals tab lists every signal by heat. Opt-in: nothing runs until you enable it, and it never acts on its own.",
+  "author": "iamwhatever",
+  "license": "MIT",
+  "tags": ["developer-tools", "planning"],
+  "highlights": [
+    "One card per proposal: pain, heat (people / days), before vs after, cost, exams",
+    "Three buttons per card set the decision: 做 / 不做 / 以后再说",
+    "Signals tab ordered by heat, merged duplicates marked",
+    "No cron, no agents, no background work: it only shows data and records your choice"
+  ],
+  "defaultEnabled": false,
+  "platform": {"os": ["macos", "linux", "windows"]},
+  "permissions": {"api": [], "events": [], "mcpTools": [], "storage": false, "cron": false, "spawn": false},
+  "ui": {
+    "entry": "index.mjs",
+    "pages": [{"route": "/apps/harness-rsi", "label": "Harness RSI", "icon": "ListChecks"}]
+  }
+}
