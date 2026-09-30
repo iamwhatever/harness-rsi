@@ -17,15 +17,33 @@ assert.deepEqual(await loadFixtures(), { proposals, signals, images: {} })
 
 // The backend source: two reads, one decision post, refresh forwards the Slack export.
 const sent = []
-const api = (slackOk) => ({
-  get: async (p) => { if (p.endsWith('/proposals')) return { proposals }; if (p.endsWith('/refresh/status')) return { github: { running: true } }; if (p.endsWith('/signals') && p.includes('harness-rsi')) return { signals }
-    if (!slackOk) throw new Error('not permitted'); return { signals: signals.slice(0, 1) } },
-  post: async (p, b) => { sent.push([p, b]); return p.endsWith('/refresh') ? { ok: true, total: 3, added: 1, errors: [] } : { ok: true } },
+const conf = { command: '', args: [], channels: ['C0AGA4Y4NP7'], window_days: 14, workspace_url: '' }
+const api = (slackOn) => ({
+  get: async (p) => { if (p.endsWith('/proposals')) return { proposals }; if (p.endsWith('/refresh/status')) return { github: { running: true } }
+    if (p.endsWith('/settings')) return { settings: conf }; if (p === '/api/apps/harness-rsi/signals') return { signals }
+    throw new Error(`unexpected read ${p}`) },
+  post: async (p, b) => { sent.push([p, b]); return p.endsWith('/refresh') ? { ok: true, total: 3, added: 1,
+    errors: slackOn ? [] : ['slack: off (no Slack MCP command set)'] } : p.endsWith('/settings') ? { settings: b } : { ok: true } },
 })
 assert.deepEqual(await ui.backendSource(api(true)).load(), { proposals, signals, images: {} })
 await ui.backendSource(api(true)).decide('prop_bg_tasks', 'do')
 assert.deepEqual((await ui.backendSource(api(true)).refresh()).errors, [])
-assert.deepEqual((await ui.backendSource(api(false)).refresh()).errors, ['slack: Slack Radar export not reachable'])
+assert.deepEqual((await ui.backendSource(api(false)).refresh()).errors, ['slack: off (no Slack MCP command set)'])
+assert.deepEqual(await ui.backendSource(api(true)).settings(), conf)
+const form = ui.toForm(conf)
+assert.deepEqual(ui.parseSettings(form), conf)
+const saved = await ui.backendSource(api(true)).saveSettings({ ...form, command: 'slack-mcp', args: '--a  --b', channels: 'C0FAKE00001, C0FAKE00002' })
+assert.deepEqual(saved, { ...conf, command: 'slack-mcp', args: ['--a', '--b'], channels: ['C0FAKE00001', 'C0FAKE00002'] })
+assert.match(ui.slackNote(conf), /^Slack collection is off/)
+assert.equal(ui.slackNote(saved), 'Slack: on, reading 2 channel(s) over 14 days')
+const changed = []
+const panel = expand(ui.SettingsForm({ form, note: '', onSave: () => changed.push('save'), onChange: (f) => changed.push(f) }))
+assert.match(text(find(panel, (n) => n.props['data-testid'] === 'slack-note')[0]), /^Slack collection is off/)
+const inputs = find(panel, (n) => n.type === 'input')
+assert.deepEqual(inputs.map((n) => n.props.name), ['command', 'args', 'channels', 'window_days', 'workspace_url'])
+inputs[0].props.onChange({ target: { value: 'slack-mcp' } })
+find(panel, (n) => n.type === 'button')[0].props.onClick()
+assert.deepEqual(changed, [{ ...form, command: 'slack-mcp' }, 'save'])
 assert.deepEqual(await ui.backendSource(api(true)).status(), { running: true })
 const job = { running: false, started_at: 1, finished_at: 2, rows: 5, error: '' }
 assert.equal(ui.jobText(null), '')
@@ -34,7 +52,8 @@ assert.equal(ui.jobText({ ...job, finished_at: null }), 'GitHub: not fetched yet
 assert.match(ui.jobText(job), /^GitHub: 5 rows at /)
 assert.match(ui.jobText({ ...job, error: 'github: TimeoutExpired' }), /failed at .*\(github: TimeoutExpired\)$/)
 assert.deepEqual(sent, [['/api/apps/harness-rsi/decisions', { proposal_id: 'prop_bg_tasks', decision: 'do' }],
-  ['/api/apps/harness-rsi/refresh', { slack: signals.slice(0, 1) }], ['/api/apps/harness-rsi/refresh', { slack: [] }]])
+  ['/api/apps/harness-rsi/refresh', {}], ['/api/apps/harness-rsi/refresh', {}],
+  ['/api/apps/harness-rsi/settings', saved]])
 
 const calls = []
 const tree = expand(ui.Board({ proposals, onDecide: (id, d) => calls.push([id, d]) }))

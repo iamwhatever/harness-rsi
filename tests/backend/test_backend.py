@@ -12,7 +12,7 @@ import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
-from backend import routes, store  # noqa: E402
+from backend import routes, settings, store  # noqa: E402
 
 SIGNALS = json.loads((ROOT / "fixtures/signals.json").read_text())
 PROPOSALS = json.loads((ROOT / "fixtures/proposals.json").read_text())
@@ -104,10 +104,11 @@ def test_refresh_merges_slack_now_and_github_when_the_slow_job_ends(data, job, m
     fresh["mentions"]["count"] = 9  # the same issue again, with a new count
     github = [fresh, row("sig_20260101_0050", "github:example-org/example-repo", "g/50", "Brand New Pain")]
     gate, calls = threading.Event(), []
+    monkeypatch.setattr(routes, "slack_rows", lambda: ([r for r in slack if r.get("source", "").startswith("slack:")], ""))
     monkeypatch.setattr(routes, "github_rows", lambda: (calls.append(1), gate.wait(10), (github, ""))[2])
 
     async def scenario():
-        req = lambda: Req({"slack": slack})  # noqa: E731
+        req = lambda: Req()  # noqa: E731
         first = json.loads((await routes._refresh(req(), None)).text)
         assert first["added"] == 2 and first["github"]["running"] is True  # Slack merged, GitHub still running
         second = json.loads((await routes._refresh(req(), None)).text)
@@ -133,7 +134,7 @@ def test_a_failed_github_job_reports_and_frees_the_slot(data, job, monkeypatch):
     monkeypatch.setattr(routes, "github_rows", lambda: ([], "github: TimeoutExpired"))
 
     async def scenario():
-        await routes._refresh(Req({"slack": []}), None)
+        await routes._refresh(Req(), None)
         await routes.JOB["task"]
         return json.loads((await routes._refresh_status(Req(), None)).text)["github"]
 
@@ -141,9 +142,62 @@ def test_a_failed_github_job_reports_and_frees_the_slot(data, job, monkeypatch):
     assert done["running"] is False and done["error"] == "github: TimeoutExpired" and done["finished_at"]
 
 
-def test_refresh_needs_owner_and_a_body(data, job):
-    assert call(routes._refresh, Req({"slack": []}, internal_auth=True))[0] == 403
-    assert call(routes._refresh, Req({"slack": "x"}))[0] == 400
+def test_refresh_needs_owner(data, job):
+    assert call(routes._refresh, Req(internal_auth=True))[0] == 403
+
+
+class FakeVault:
+    def __init__(self):
+        self.saved = {}
+
+    def get(self, name):
+        return types.SimpleNamespace(reveal=lambda: self.saved[name]) if name in self.saved else None
+
+    def set_sync(self, name, value):
+        self.saved[name] = value
+
+
+def test_refresh_works_with_slack_off(data, job, monkeypatch):
+    monkeypatch.setattr(routes, "github_rows", lambda: ([], ""))
+    monkeypatch.setattr(routes.adapters.slack, "collect", lambda conf: pytest.fail("Slack must stay off"))
+
+    async def scenario():
+        out = json.loads((await routes._refresh(Req(), None)).text)
+        await routes.JOB["task"]
+        return out
+
+    out = asyncio.run(scenario())
+    assert out["ok"] and out["added"] == 0 and out["errors"] == ["slack: off (no Slack MCP command set)"]
+
+
+def test_settings_default_off_then_owner_saves_command_to_vault(data, monkeypatch):
+    vault = FakeVault()
+    monkeypatch.setattr(settings, "_vault", lambda: vault)
+    assert call(routes._settings_get)[1]["settings"] == settings.DEFAULTS
+    assert settings.DEFAULTS["command"] == "" and settings.DEFAULTS["channels"] == ["C0AGA4Y4NP7"]
+    new = {"command": "slack-mcp", "args": ["--read-only"], "channels": ["c0fake00003"], "window_days": 7}
+    assert call(routes._settings_post, Req(new, internal_auth=True))[0] == 403
+    assert call(routes._settings_post, Req({**new, "args": ["a;b"]}))[0] == 400
+    assert call(routes._settings_post, Req({"channels": ["general"]}))[0] == 400
+    assert call(routes._settings_post, Req({"window_days": 0}))[0] == 400
+    assert not vault.saved and not (data / settings.FILE).exists()
+    status, body = call(routes._settings_post, Req(new))
+    assert status == 200 and body["settings"]["channels"] == ["C0FAKE00003"]
+    assert json.loads(vault.saved[settings.VAULT_NAME]) == {"command": "slack-mcp", "args": ["--read-only"], "workspace_url": ""}
+    local = json.loads((data / settings.FILE).read_text())
+    assert local == {"channels": ["C0FAKE00003"], "window_days": 7}  # the spawn target never sits in the data dir
+    (data / settings.FILE).write_text(json.dumps({"command": "evil", "channels": ["C0FAKE00004"]}))
+    got = settings.read()
+    assert got["command"] == "slack-mcp" and got["channels"] == ["C0FAKE00004"]
+
+
+def test_slack_rows_pass_saved_settings_to_the_collector(data, monkeypatch):
+    seen = []
+    monkeypatch.setattr(settings, "read", lambda: {**settings.DEFAULTS, "command": "slack-mcp"})
+    monkeypatch.setattr(routes.adapters.slack, "collect", lambda conf: seen.append(conf) or [])
+    assert routes.slack_rows() == ([], "") and seen[0]["command"] == "slack-mcp"
+    monkeypatch.setattr(routes.adapters.slack, "collect", lambda conf: (_ for _ in ()).throw(OSError("x")))
+    assert routes.slack_rows() == ([], "slack: OSError")
 
 
 def test_disabled_app_registers_nothing(tmp_path, monkeypatch):
@@ -156,5 +210,5 @@ def test_disabled_app_registers_nothing(tmp_path, monkeypatch):
     monkeypatch.setitem(sys.modules, "kiro_crew.apps.route_registry", fake)
     got = [(r["method"], r["path"]) for r in routes.register_routes(None)]
     assert got == [("GET", "/signals"), ("GET", "/proposals"), ("POST", "/decisions"), ("POST", "/refresh"),
-                   ("GET", "/refresh/status")]
+                   ("GET", "/refresh/status"), ("GET", "/settings"), ("POST", "/settings")]
     assert not (tmp_path / "d").exists()
