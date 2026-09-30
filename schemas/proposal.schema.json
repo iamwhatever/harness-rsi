@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/iamwhatever/harness-rsi/schemas/proposal.schema.json",
+  "description": "One row of the priority card. decision is null until the owner picks.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "pain", "signal_ids", "heat", "mock_artifact_slug", "cost", "exam_ids", "decision"],
+  "properties": {
+    "id": {"type": "string", "pattern": "^prop_[a-z0-9_]+$"},
+    "pain": {"type": "string", "minLength": 1, "maxLength": 200},
+    "signal_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "pattern": "^sig_[0-9]{8}_[0-9]{4}$"}},
+    "heat": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["people", "window_days"],
+      "properties": {"people": {"type": "integer", "minimum": 1}, "window_days": {"type": "integer", "minimum": 1}}
+    },
+    "mock_artifact_slug": {"type": ["string", "null"], "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"},
+    "cost": {
+      "description": "Change budget: at most 10 files and 300 lines per PR.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["files", "lines", "risks"],
+      "properties": {
+        "files": {"type": "integer", "minimum": 1, "maximum": 10},
+        "lines": {"type": "integer", "minimum": 1, "maximum": 300},
+        "risks": {"type": "array", "items": {"type": "string", "minLength": 1}}
+      }
+    },
+    "exam_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "pattern": "^exam_[a-z0-9_]+$"}},
+    "decision": {"enum": ["do", "skip", "later", null]}
+  }
+}

@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/iamwhatever/harness-rsi/schemas/judge.schema.json",
+  "description": "Judge CLI contract: the CLI reads `input` as JSON on stdin and writes `output` as JSON on stdout.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["input", "output"],
+  "properties": {"input": {"$ref": "#/$defs/input"}, "output": {"$ref": "#/$defs/output"}},
+  "$defs": {
+    "suite": {"enum": ["new", "hidden", "regression", "metrics"]},
+    "input": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pr", "repo", "suites"],
+      "properties": {
+        "pr": {"type": "integer", "minimum": 1},
+        "repo": {"type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"},
+        "suites": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/suite"}}
+      }
+    },
+    "output": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["verdict", "scores", "paired_metrics", "evidence"],
+      "properties": {
+        "verdict": {"enum": ["pass", "fail"]},
+        "scores": {
+          "description": "Pass ratio per suite that was run.",
+          "type": "object",
+          "minProperties": 1,
+          "propertyNames": {"$ref": "#/$defs/suite"},
+          "additionalProperties": {"type": "number", "minimum": 0, "maximum": 1}
+        },
+        "paired_metrics": {
+          "description": "Metric pairs read together: one may not improve at the other's cost.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["a", "b", "delta_a", "delta_b", "ok"],
+            "properties": {
+              "a": {"type": "string", "pattern": "^[a-z0-9_]+$"},
+              "b": {"type": "string", "pattern": "^[a-z0-9_]+$"},
+              "delta_a": {"type": "number"},
+              "delta_b": {"type": "number"},
+              "ok": {"type": "boolean"}
+            }
+          }
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["exam_id", "ok", "detail"],
+            "properties": {
+              "exam_id": {"type": "string", "pattern": "^exam_[a-z0-9_]+$"},
+              "ok": {"type": "boolean"},
+              "detail": {"type": "string"},
+              "url": {"type": "string", "format": "uri"}
+            }
+          }
+        }
+      }
+    }
+  }
+}
