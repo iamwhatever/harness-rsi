@@ -1,16 +1,27 @@
-"""Harness RSI HTTP API under ``/api/apps/harness-rsi``: two reads and one owner-only write.
+"""Harness RSI HTTP API under ``/api/apps/harness-rsi``: two reads, two owner-only writes.
 
-Nothing here runs on its own: no startup hook, no loop, no timer.
+``POST /refresh`` takes the Slack Radar export rows the page fetched from
+``GET /api/apps/slack-radar/signals`` (the page holds that grant, the backend holds no
+token) and merges them at once. It also starts ``python -m adapters.github_issues`` as a
+one-shot job (at most one at a time; it takes minutes) whose rows merge when it exits;
+``GET /refresh/status`` reports that job. Nothing starts on its own: no startup hook, no timer.
 """
 
 import asyncio
+import json
+import subprocess
+import sys
+import time
 
 from aiohttp import web
 
 from . import store
 
 APP_NAME = "harness-rsi"
-MAX_BODY = 64 * 1024
+MAX_BODY = 2 * 1024 * 1024
+GITHUB_TIMEOUT_S = 30 * 60
+#: The GitHub job: ``task`` is the running asyncio task, the rest is shown on the board.
+JOB = {"task": None, "running": False, "started_at": None, "finished_at": None, "rows": None, "error": ""}
 
 
 def _err(status, code, message):
@@ -41,6 +52,17 @@ async def _body(request):
     return body if isinstance(body, dict) else None
 
 
+def github_rows():
+    """Signal rows from the GitHub adapter, or ``([], error)``."""
+    try:
+        r = subprocess.run([sys.executable, "-m", "adapters.github_issues"], cwd=store.ROOT,
+                           capture_output=True, text=True, timeout=GITHUB_TIMEOUT_S)
+        rows = json.loads(r.stdout) if r.returncode == 0 else None
+    except (OSError, subprocess.TimeoutExpired, ValueError) as exc:
+        return [], f"github: {type(exc).__name__}"
+    return (rows, "") if isinstance(rows, list) else ([], f"github: adapter exit {r.returncode}")
+
+
 async def _signals(request, ctx):
     rows = await asyncio.to_thread(store.read_signals)
     return web.json_response({"ok": True, "signals": store.by_heat(rows)})
@@ -64,6 +86,41 @@ async def _decide(request, ctx):
     return web.json_response({"ok": True, "appended": appended})
 
 
+def _job_view():
+    return {k: v for k, v in JOB.items() if k != "task"}
+
+
+async def _github_job():
+    try:
+        rows, error = await asyncio.to_thread(github_rows)
+        if rows:
+            await asyncio.to_thread(store.refresh, [rows])
+        JOB.update(rows=len(rows), error=error)
+    except Exception as exc:  # noqa: BLE001 - the job must always report and release
+        JOB.update(rows=None, error=f"github: {type(exc).__name__}")
+    finally:
+        JOB.update(running=False, finished_at=time.time(), task=None)
+
+
+async def _refresh(request, ctx):
+    if not _owner(request):
+        return _err(403, "owner_only", "only the dashboard owner can refresh")
+    body = await _body(request)
+    slack = body.get("slack") if body else None
+    if not isinstance(slack, list):
+        return _err(400, "bad_body", "body must be {\"slack\": [signal rows]}")
+    slack = [r for r in slack if isinstance(r, dict) and str(r.get("source", "")).startswith("slack:")]
+    total, added = await asyncio.to_thread(store.refresh, [slack])
+    if not JOB["running"]:  # single-flight: a refresh during a run only reports it
+        JOB.update(running=True, started_at=time.time(), finished_at=None, rows=None, error="")
+        JOB["task"] = asyncio.get_running_loop().create_task(_github_job())
+    return web.json_response({"ok": True, "total": total, "added": added, "errors": [], "github": _job_view()})
+
+
+async def _refresh_status(request, ctx):
+    return web.json_response({"ok": True, "github": _job_view()})
+
+
 def register_routes(ctx):
     """Named by ``backend.hooks.routes``; the host calls it only for an enabled app."""
     from kiro_crew.apps.route_registry import AppRoute
@@ -72,4 +129,6 @@ def register_routes(ctx):
         AppRoute(method="GET", path="/signals", handler=_signals),
         AppRoute(method="GET", path="/proposals", handler=_proposals),
         AppRoute(method="POST", path="/decisions", handler=_decide),
+        AppRoute(method="POST", path="/refresh", handler=_refresh),
+        AppRoute(method="GET", path="/refresh/status", handler=_refresh_status),
     ]

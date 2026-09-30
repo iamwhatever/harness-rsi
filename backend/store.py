@@ -1,4 +1,4 @@
-"""The shared data dir: schema-checked reads and the decision append.
+"""The shared data dir: schema-checked reads, the decision append and the signal merge.
 
 Under ``$HARNESS_RSI_DATA`` (default ``~/.kiro/crew/harness-rsi-data``): ``signals.jsonl``,
 ``proposals.json`` (a list), ``decisions.jsonl`` (append-only ``{proposal_id, decision, ts}``).
@@ -8,6 +8,8 @@ A missing dir or file reads as an empty list; a row that fails its schema is lef
 import functools
 import json
 import os
+import re
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -17,6 +19,7 @@ from jsonschema import Draft202012Validator
 ROOT = Path(__file__).resolve().parents[1]
 DECISIONS = ("do", "skip", "later")
 _LOCK = threading.Lock()
+_WORD_RE = re.compile(r"[\W_]+")
 
 
 def data_dir():
@@ -84,3 +87,54 @@ def append_decision(proposal_id, decision, now=time.time):
             fh.write(json.dumps({"proposal_id": proposal_id, "decision": decision, "ts": ts}) + "\n")
         return True
 
+
+def _free_id(sid, taken):
+    return next((c for c in (f"sig_{sid[4:12]}_{n:04d}" for n in range(1, 10000)) if c not in taken), None)
+
+
+def merge(existing, batches):
+    """One item (first link) is one row, refreshed in place; an id another item holds is
+    swapped for a free one; a primary whose pain matches an earlier primary joins it."""
+    rows = [dict(r) for r in existing]
+    at = {r["links"][0]: i for i, r in enumerate(rows)}
+    for batch in batches:
+        batch, taken, remap = [r for r in batch if valid("signal", r)], {r["id"] for r in rows}, {}
+        for r in batch:
+            i = at.get(r["links"][0])
+            remap[r["id"]] = rows[i]["id"] if i is not None else r["id"] if r["id"] not in taken else _free_id(r["id"], taken)
+            taken.add(remap[r["id"]])
+        for r in (r for r in batch if remap[r["id"]]):
+            r = {**r, "id": remap[r["id"]], "dedup_of": remap.get(r["dedup_of"], r["dedup_of"])}
+            i = at.setdefault(r["links"][0], len(rows))
+            rows[i:i + 1] = [r]
+    first, ids = {}, {r["id"]: r for r in rows}
+    for r in rows:
+        key = _WORD_RE.sub(" ", r["pain"].casefold()).strip()
+        if not r["dedup_of"] and first.setdefault(key, r["id"]) != r["id"]:
+            r["dedup_of"] = first[key]
+    for r in rows:  # a row merged into a merged row points at the root
+        for _ in rows:
+            if not (r["dedup_of"] in ids and ids[r["dedup_of"]]["dedup_of"]):
+                break
+            r["dedup_of"] = ids[r["dedup_of"]]["dedup_of"]
+        if r["dedup_of"] == r["id"]:
+            r["dedup_of"] = None
+    return rows
+
+
+def write_signals(rows):
+    path = data_dir() / "signals.jsonl"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".signals.")
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        fh.writelines(json.dumps(r, ensure_ascii=False) + "\n" for r in rows)
+    os.replace(tmp, path)
+
+
+def refresh(batches):
+    """Merge ``batches`` into signals.jsonl under the lock; returns ``(total, added)``."""
+    with _LOCK:
+        before = read_signals()
+        rows = merge(before, batches)
+        write_signals(rows)
+        return len(rows), len(rows) - len(before)

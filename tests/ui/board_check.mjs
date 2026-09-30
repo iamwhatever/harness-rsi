@@ -2,6 +2,7 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import * as ui from './ui/index.mjs'
+import { loadFixtures } from './ui/fake-data.mjs'
 
 const [proposals, signals] = ['proposals', 'signals'].map((f) => JSON.parse(fs.readFileSync(`fixtures/${f}.json`, 'utf8')))
 
@@ -12,7 +13,28 @@ const all = (nodes) => nodes.filter((n) => n && typeof n === 'object').flatMap((
 const text = (n) => (n && typeof n === 'object' ? n.children.map(text).join('') : n == null ? '' : String(n))
 const find = (nodes, pred) => all(nodes).filter(pred)
 
-assert.deepEqual(await ui.loadFixtures(), { proposals, signals, images: {} })
+assert.deepEqual(await loadFixtures(), { proposals, signals, images: {} })
+
+// The backend source: two reads, one decision post, refresh forwards the Slack export.
+const sent = []
+const api = (slackOk) => ({
+  get: async (p) => { if (p.endsWith('/proposals')) return { proposals }; if (p.endsWith('/refresh/status')) return { github: { running: true } }; if (p.endsWith('/signals') && p.includes('harness-rsi')) return { signals }
+    if (!slackOk) throw new Error('not permitted'); return { signals: signals.slice(0, 1) } },
+  post: async (p, b) => { sent.push([p, b]); return p.endsWith('/refresh') ? { ok: true, total: 3, added: 1, errors: [] } : { ok: true } },
+})
+assert.deepEqual(await ui.backendSource(api(true)).load(), { proposals, signals, images: {} })
+await ui.backendSource(api(true)).decide('prop_bg_tasks', 'do')
+assert.deepEqual((await ui.backendSource(api(true)).refresh()).errors, [])
+assert.deepEqual((await ui.backendSource(api(false)).refresh()).errors, ['slack: Slack Radar export not reachable'])
+assert.deepEqual(await ui.backendSource(api(true)).status(), { running: true })
+const job = { running: false, started_at: 1, finished_at: 2, rows: 5, error: '' }
+assert.equal(ui.jobText(null), '')
+assert.match(ui.jobText({ ...job, running: true }), /^GitHub: fetching since /)
+assert.equal(ui.jobText({ ...job, finished_at: null }), 'GitHub: not fetched yet')
+assert.match(ui.jobText(job), /^GitHub: 5 rows at /)
+assert.match(ui.jobText({ ...job, error: 'github: TimeoutExpired' }), /failed at .*\(github: TimeoutExpired\)$/)
+assert.deepEqual(sent, [['/api/apps/harness-rsi/decisions', { proposal_id: 'prop_bg_tasks', decision: 'do' }],
+  ['/api/apps/harness-rsi/refresh', { slack: signals.slice(0, 1) }], ['/api/apps/harness-rsi/refresh', { slack: [] }]])
 
 const calls = []
 const tree = expand(ui.Board({ proposals, onDecide: (id, d) => calls.push([id, d]) }))

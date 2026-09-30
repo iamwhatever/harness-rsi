@@ -1,13 +1,30 @@
 // Harness RSI priority board. Hand-written ESM, no build step: the host's import
 // map resolves `react` and `@kirocrew/app-sdk/ui`, as it does for a built bundle.
-import { createElement as h, useEffect, useState } from 'react'
+import { createElement as h, useCallback, useEffect, useMemo, useState } from 'react'
+import { useAppApi } from '@kirocrew/app-sdk'
 import { Badge, Btn, Card, EmptyState, PageHeader } from '@kirocrew/app-sdk/ui'
-import * as fake from './fake-data.mjs'
 
-/** The ONE data source: { proposals, signals, images? } where images[id].before is
- *  a screenshot URL of the page today. R1 answers the fake fixtures; R2 swaps it. */
-export async function loadFixtures() {
-  return { proposals: fake.proposals, signals: fake.signals, images: {} }
+const BASE = '/api/apps/harness-rsi'
+const SLACK_EXPORT = '/api/apps/slack-radar/signals'
+
+/** The data source over the app backend. `load` answers { proposals, signals, images }
+ *  (images[id].before is a screenshot URL of the page today); tests pass fake-data.mjs instead. */
+export function backendSource(api) {
+  return {
+    load: async () => {
+      const [p, s] = await Promise.all([api.get(`${BASE}/proposals`), api.get(`${BASE}/signals`)])
+      return { proposals: p.proposals, signals: s.signals, images: {} }
+    },
+    decide: (id, decision) => api.post(`${BASE}/decisions`, { proposal_id: id, decision }),
+    status: async () => (await api.get(`${BASE}/refresh/status`)).github,
+    // Slack Radar may be off or missing: GitHub still refreshes, and the reason is shown.
+    refresh: async () => {
+      let slack = [], errors = []
+      try { slack = (await api.get(SLACK_EXPORT)).signals || [] } catch { errors = ['slack: Slack Radar export not reachable'] }
+      const r = await api.post(`${BASE}/refresh`, { slack })
+      return { ...r, errors: [...errors, ...(r.errors || [])] }
+    },
+  }
 }
 
 export const DECISIONS = [['do', '做', 'Doing'], ['skip', '不做', 'Not doing'], ['later', '以后再说', 'Later']]
@@ -85,18 +102,35 @@ export function Signals({ signals }) {
 }
 
 const TABS = [['board', 'Board'], ['signals', 'Signals']]
-/** The page. `load` is the injectable data source; `onDecide` hears every choice. */
-export default function HarnessRsi({ load = loadFixtures, onDecide } = {}) {
+const why = (e) => String(e?.message || e)
+const clock = (t) => new Date(t * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+/** One line for the GitHub job (it runs for minutes after a refresh). */
+export const jobText = (j) => (!j ? '' : j.running ? `GitHub: fetching since ${clock(j.started_at)}…`
+  : !j.finished_at ? 'GitHub: not fetched yet' : j.error ? `GitHub: failed at ${clock(j.finished_at)} (${j.error})`
+    : `GitHub: ${j.rows} rows at ${clock(j.finished_at)}`)
+/** The page body. `load` is the data source; `onDecide` saves a choice; `onRefresh` pulls
+ *  signals; `onStatus` reads the GitHub job, polled while it runs. */
+export function HarnessRsi({ load, onDecide, onRefresh, onStatus }) {
   const [[data, error], setState] = useState([null, ''])
   const [tab, setTab] = useState('board')
+  const [note, setNote] = useState('')
+  const reload = useCallback(() => load().then((d) => setState([d, '']), (e) => setState([null, why(e)])), [load])
+  useEffect(() => { reload() }, [reload])
+  const [job, setJob] = useState(null)
+  useEffect(() => { onStatus?.().then(setJob, () => {}) }, [onStatus])
   useEffect(() => {
-    let live = true
-    load().then((d) => live && setState([d, '']), (e) => live && setState([null, String(e?.message || e)]))
-    return () => { live = false }
-  }, [load])
+    if (!job?.running || !onStatus) return undefined
+    const t = setTimeout(() => onStatus().then((j) => { setJob(j); if (!j.running) reload() }, () => setJob({ ...job })), 5000)
+    return () => clearTimeout(t)
+  }, [job, onStatus, reload])
   const decide = (id, decision) => {
     setState(([d]) => [{ ...d, proposals: applyDecision(d.proposals, id, decision) }, ''])
-    onDecide?.(id, decision)
+    Promise.resolve(onDecide?.(id, decision)).catch((e) => setNote(`Could not save the decision: ${why(e)}`))
+  }
+  const refresh = () => {
+    setNote('Refreshing signals…')
+    onRefresh().then((r) => { setNote([`Signals: ${r.total} (${r.added} new)`, ...r.errors].join(' · ')); setJob(r.github || null); reload() },
+      (e) => setNote(`Could not refresh: ${why(e)}`))
   }
   const tabStyle = (on) => ({ padding: '6px 12px', borderRadius: 8, border: 0, cursor: 'pointer', fontSize: 14,
     background: on ? 'var(--bg-hover)' : 'transparent', color: on ? 'var(--text-strong)' : MUTED })
@@ -107,9 +141,20 @@ export default function HarnessRsi({ load = loadFixtures, onDecide } = {}) {
   return h('div', { style: { flex: 1, overflowY: 'auto' } },
     h(PageHeader, { title: 'Harness RSI', subtitle: 'Pick what to build next. Nothing runs until you decide.' }),
     h('div', { style: { padding: '0 24px 24px', display: 'flex', flexDirection: 'column', gap: 12, maxWidth: 960 } },
-      h('div', { role: 'tablist', 'aria-label': 'Harness RSI sections', style: { display: 'flex', gap: 4 } },
-        TABS.map(([id, text]) => h('button', { key: id, type: 'button', role: 'tab', id: `tab-${id}`,
-          'aria-selected': tab === id, 'aria-controls': 'rsi-panel', onClick: () => setTab(id), style: tabStyle(tab === id) },
-        text))),
+      h('div', { style: { display: 'flex', gap: 4, alignItems: 'center', flexWrap: 'wrap' } },
+        h('div', { role: 'tablist', 'aria-label': 'Harness RSI sections', style: { display: 'flex', gap: 4 } },
+          TABS.map(([id, text]) => h('button', { key: id, type: 'button', role: 'tab', id: `tab-${id}`,
+            'aria-selected': tab === id, 'aria-controls': 'rsi-panel', onClick: () => setTab(id), style: tabStyle(tab === id) },
+          text))),
+        onRefresh ? h(Btn, { type: 'button', onClick: refresh, style: { marginLeft: 'auto' } }, 'Refresh signals') : null),
+      h('div', { style: muted, 'aria-live': 'polite', 'data-testid': 'note' }, note),
+      h('div', { style: muted, 'aria-live': 'polite', 'data-testid': 'github-job' }, jobText(job)),
       h('div', { role: 'tabpanel', id: 'rsi-panel', 'aria-labelledby': `tab-${tab}` }, body)))
+}
+
+/** The installed page: the backend is the data source. */
+export default function HarnessRsiPage() {
+  const api = useAppApi()
+  const src = useMemo(() => backendSource(api), [api])
+  return h(HarnessRsi, { load: src.load, onDecide: src.decide, onRefresh: src.refresh, onStatus: src.status })
 }
