@@ -2,10 +2,11 @@
 """Run one design-crew round into the shared data dir.
 
 Steps: collect signals (GitHub adapter, Slack via the owner's Slack MCP when set,
-session scanner, trend scout) -> question setter writes hidden exams from the
-signals ONLY, before any proposal exists -> the two reviewers debate for exactly
-``reduce.ROUNDS`` rounds -> ``reduce.reduce_debate`` -> one HTML mock artifact per
-proposal. Agents, collectors and the mock saver are injected, so tests run fakes.
+session scanner, trend scout) -> ``enrich.enrich`` (Slack tasks, cross-source merge)
+-> question setter writes hidden exams from the signals ONLY, before any proposal
+exists -> the two reviewers debate for exactly ``reduce.ROUNDS`` rounds ->
+``reduce.reduce_debate`` -> one HTML mock artifact per proposal. Agents,
+collectors and the mock saver are injected, so tests run fakes.
 
 Data dir (``$HARNESS_RSI_DATA``, default ``~/.kiro/crew/harness-rsi-data``):
 ``signals.jsonl``, ``proposals.json``, ``exams/hidden/<id>.json``, ``mocks/``.
@@ -34,6 +35,7 @@ from jsonschema import Draft202012Validator
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "crew"))
+import enrich  # noqa: E402
 import reduce  # noqa: E402
 
 Agent = Callable[[str, str], str]  # (agent name, task message) -> reply text
@@ -135,7 +137,7 @@ def run_round(*, agent: Agent, collectors: list[Callable[[], list[dict]]], save_
     batches = [c() for c in collectors]
     batches += [parse_rows(agent(name, f"Today is {day}. Scan now and reply with the JSON array.\n" + _schema("signal")))
                 for name in (SCANNER, SCOUT)]
-    signals = merge_signals(batches, day)
+    signals, _ = enrich.enrich(merge_signals(batches, day))  # Slack tasks + cross-source heat
     exams = write_exams(agent, signals, rnd)  # before the debate: no proposal can exist yet
     v = _validator("proposal")
     transcript = debate(agent, signals)

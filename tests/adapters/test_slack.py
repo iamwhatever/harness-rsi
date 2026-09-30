@@ -119,3 +119,11 @@ def test_round_runner_reads_slack_itself_and_stays_off_without_a_command(monkeyp
     assert rr.slack_collector("slack-mcp")() == [{"id": "x"}] and seen[-1]["command"] == "slack-mcp"
     monkeypatch.setattr(slack, "collect", lambda conf: (_ for _ in ()).throw(slack.SlackMcpError("down")))
     assert rr.slack_collector("slack-mcp")() == []
+
+
+def test_concrete_pains_carry_a_task_and_the_judge_is_injectable():
+    out = rows()
+    assert all(r["testable"]["ok"] and r["testable"]["task"] for r in out)
+    assert all(r["pain"].casefold() in r["testable"]["task"] for r in out)
+    off = rows(testable=lambda pain: {"ok": False, "task": None})
+    assert all(r["testable"] == {"ok": False, "task": None} for r in off)

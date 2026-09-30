@@ -135,6 +135,33 @@ def gist(msg):
     return " ".join(words[:GIST_WORDS]).capitalize() if len(words) >= 3 else ""
 
 
+_FAIL = ("crash", "error", "fail", "die", "dead", "stuck", "hang", "frozen", "freez", "slow", "lag", "lost", "leak",
+         "broke", "bug", "delet", "redact", "paus", "accumulat", "grow", "won't", "can't", "doesn't", "never",
+         "restart", "timeout", "wrong", "issue")
+_THING = ("session", "agent", "subagent", "cron", "chat", "dashboard", "gateway", "process", "memory", "upgrad", "updat",
+          "tunnel", "mcp", "tool", "app", "command", "link", "prompt", "remote", "instance", "desktop", "model",
+          "kiro", "crew", "ram", "load", "run", "launch", "task", "page", "search", "sidebar", "tab", "button",
+          "file", "config", "setting", "login", "auth", "token")
+_OPINION = ("support", "possible", "recommend", "curious", "curiosity", "idea", "thought", "nice", "great", "love",
+            "thank", "improv", "handover", "suggest", "wish", "example", "should")
+
+
+def _first(words, stems):
+    """The first word that is one of ``stems`` plus at most a short ending ("approaches" is not "app")."""
+    return next((w for w in words for st in stems if w.startswith(st) and len(w) <= len(st) + 4), None)
+
+
+def testable(pain):
+    """``{ok, task}`` for a pain gist: a named KiroCrew thing that visibly misbehaves is checkable;
+    a question, opinion, request or praise is not. Pure and deterministic."""
+    words = pain.casefold().split()
+    fail, thing = _first(words, _FAIL), _first(words, _THING)
+    if not (fail and thing) or _first(words, _OPINION):
+        return {"ok": False, "task": None}
+    return {"ok": True, "task": f"On a fresh KiroCrew install, repeat the steps behind '{pain.casefold()}' "
+                                f"({fail} around {thing}); the judge passes when they finish with no {fail}."}
+
+
 def _link(channel, msg, workspace_url):
     return f"{(workspace_url or 'https://slack.com').rstrip('/')}/archives/{channel}/p{msg['ts'].replace('.', '')}"
 
@@ -161,8 +188,10 @@ def _history(call, channels, oldest):
     return out
 
 
-def build_signals(call, channels=DEFAULT_CHANNELS, window_days=DEFAULT_WINDOW_DAYS, workspace_url="", now=None):
-    """Signal rows from ``call(tool, args)``; only read tools get through."""
+def build_signals(call, channels=DEFAULT_CHANNELS, window_days=DEFAULT_WINDOW_DAYS, workspace_url="", now=None,
+                  testable=testable):
+    """Signal rows from ``call(tool, args)``; only read tools get through. ``testable(pain)`` fills each row's
+    ``testable``."""
     call, now = guard(call), now or dt.datetime.now(dt.timezone.utc)
     allow = [c for c in dict.fromkeys(channels) if isinstance(c, str) and CHANNEL_RE.match(c)]
     oldest = (now - dt.timedelta(days=window_days)).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -185,7 +214,7 @@ def build_signals(call, channels=DEFAULT_CHANNELS, window_days=DEFAULT_WINDOW_DA
         row = {"id": f"sig_{day}_{per_day[day]:04d}", "source": f"slack:{cid}", "links": [_link(cid, m, workspace_url)],
                "pain": pain, "mentions": {"count": 1 + int(m.get("reply_count") or 0), "people": max(len(people), 1),
                                           "window_days": window_days},
-               "layer": "real", "testable": {"ok": False, "task": None}, "dedup_of": None}
+               "layer": "real", "testable": testable(pain), "dedup_of": None}
         keys = set(pain.casefold().split())
         head = next((g for g in groups if len(keys & g[1]) >= 3 and len(keys & g[1]) * 2 >= len(keys | g[1])), None)
         if head:  # same pain: point at the first row and add this thread's counts to it
