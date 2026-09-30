@@ -39,6 +39,7 @@ Saver = Callable[[str, str, str], str]  # (slug, title, html) -> saved slug
 SCANNER, SCOUT, SETTER = "rsi-session-scanner", "rsi-trend-scout", "rsi-question-setter"
 VALUE, RISK = reduce.REVIEWERS
 MIN_PROPOSALS, MAX_PROPOSALS = 3, 5
+PER_SOURCE = 40  # hottest rows kept per source, so every agent prompt stays small
 
 
 class RoundError(RuntimeError):
@@ -65,10 +66,12 @@ def parse_rows(text: str) -> list:
 
 
 def merge_signals(batches: list[list[dict]], day: str) -> list[dict]:
-    """Schema-valid rows from every source, renumbered so ids never collide."""
+    """The hottest schema-valid rows of every source, renumbered so ids never collide."""
     v, out = _validator("signal"), []
     for batch in batches:
         rows = [r for r in batch if not list(v.iter_errors(r))]
+        rows.sort(key=lambda r: (r["testable"]["ok"], r["mentions"]["people"], r["mentions"]["count"]), reverse=True)
+        rows = rows[:PER_SOURCE]
         ids = {r["id"]: f"sig_{day}_{len(out) + n + 1:04d}" for n, r in enumerate(rows)}
         for r in rows:
             out.append({**r, "id": ids[r["id"]], "dedup_of": ids.get(r["dedup_of"])})

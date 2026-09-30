@@ -129,3 +129,12 @@ def test_parse_rows_takes_last_array_and_ignores_prose():
     mod = load()
     assert mod.parse_rows("see [1] and\n```json\n[{\"a\": 1}]\n```") == [{"a": 1}]
     assert mod.parse_rows("no json here") == []
+
+
+def test_each_source_is_capped_to_its_hottest_rows():
+    mod = load()
+    rows = [{**FakeCrew.signal(i, "github:o/r", "real"), "mentions": {"count": i, "people": 1, "window_days": 7}}
+            for i in range(1, mod.PER_SOURCE + 11)]
+    kept = mod.merge_signals([rows, [FakeCrew.signal(1, "trend:x", "external")]], "20260930")
+    assert len(kept) == mod.PER_SOURCE + 1 and kept[0]["mentions"]["count"] == mod.PER_SOURCE + 10
+    assert [s["id"] for s in kept][-1] == f"sig_20260930_{mod.PER_SOURCE + 1:04d}"
