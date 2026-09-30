@@ -19,26 +19,31 @@ const tailwindcss = (await load('@tailwindcss/vite')).default
 const pw = await load('playwright-core')
 const nm = path.join(site, 'node_modules')
 
-// The real ui/index.mjs, fed the fixtures plus one baseline shot as a "before" image.
+// The real ui/index.mjs page body, fed the fixtures plus one baseline shot as a "before" image.
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'rsi-shoot-'))
 const before = `/@fs${path.join(repo, 'baseline/screenshots/chat.png')}`
+// The page body never calls the backend hook; a stub keeps the host SDK barrel out.
+fs.writeFileSync(path.join(tmp, 'app-sdk.js'), 'export const useAppApi = () => null\n')
 fs.writeFileSync(path.join(tmp, 'harness.css'), '@import "@host/index.css";\n')
 fs.writeFileSync(path.join(tmp, 'index.html'),
   '<!doctype html><html lang="en"><body><div id="root"></div><script type="module" src="./main.jsx"></script></body></html>')
 fs.writeFileSync(path.join(tmp, 'main.jsx'), `import { createRoot } from 'react-dom/client'
 import { initI18n } from '@host/i18n/all'
-import HarnessRsi, { loadFixtures } from '${path.join(repo, 'ui/index.mjs')}'
+import { HarnessRsi } from '${path.join(repo, 'ui/index.mjs')}'
+import { loadFixtures } from '${path.join(repo, 'ui/fake-data.mjs')}'
 import './harness.css'
 initI18n('en')
 document.documentElement.setAttribute('data-theme', 'dark')
 const load = async () => ({ ...(await loadFixtures()), images: { prop_bg_tasks: { before: '${before}' } } })
-createRoot(document.getElementById('root')).render(<div className="flex flex-col h-screen bg-bg text-text"><HarnessRsi load={load} /></div>)
+const onRefresh = async () => ({ total: 10, added: 0, errors: [] })
+createRoot(document.getElementById('root')).render(<div className="flex flex-col h-screen bg-bg text-text"><HarnessRsi load={load} onRefresh={onRefresh} /></div>)
 `)
 const alias = (name, to) => [{ find: new RegExp(`^${name}$`), replacement: to }, { find: new RegExp(`^${name}/(.*)$`), replacement: `${to}/$1` }]
 const server = await createServer({
   configFile: false, root: tmp, logLevel: 'warn', plugins: [react(), tailwindcss()],
   resolve: { alias: [
     { find: /^@kirocrew\/app-sdk\/ui$/, replacement: path.join(site, 'src/components/ui.tsx') },
+    { find: /^@kirocrew\/app-sdk$/, replacement: path.join(tmp, 'app-sdk.js') },
     { find: /^@host\//, replacement: path.join(site, 'src') + '/' },
     ...alias('react', path.join(nm, 'react')), ...alias('react-dom', path.join(nm, 'react-dom')),
   ] },
