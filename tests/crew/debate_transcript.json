@@ -1,0 +1,30 @@
+{
+  "rounds": [
+    {
+      "round": 1,
+      "turns": [
+        {
+          "agent": "rsi-reviewer-value",
+          "text": "Candidates: background tasks that survive closing the page (7 people, 14 days), plain error sentences (2 people), and stopping retry loops. Users notice the first one on day one."
+        },
+        {
+          "agent": "rsi-reviewer-risk",
+          "text": "Background tasks touch session teardown; keep it under 4 files. Plain errors are cheap but must keep the detail one click away. Retry loops are fine. One-step undo is near the line budget and risks data loss."
+        }
+      ]
+    },
+    {
+      "round": 2,
+      "turns": [
+        {
+          "agent": "rsi-reviewer-value",
+          "text": "Agreed on teardown scope and keeping error detail reachable. I drop undo.\n\n```json\n[\n  {\n    \"id\": \"prop_bg_tasks\",\n    \"pain\": \"Background task is lost after closing the page\",\n    \"signal_ids\": [\n      \"sig_20260101_0001\"\n    ],\n    \"heat\": {\n      \"people\": 5,\n      \"window_days\": 14\n    },\n    \"mock_artifact_slug\": null,\n    \"cost\": {\n      \"files\": 3,\n      \"lines\": 150,\n      \"risks\": []\n    },\n    \"exam_ids\": [],\n    \"decision\": null\n  },\n  {\n    \"id\": \"prop_plain_errors\",\n    \"pain\": \"Error text shows a raw stack trace\",\n    \"signal_ids\": [\n      \"sig_20260101_0007\"\n    ],\n    \"heat\": {\n      \"people\": 2,\n      \"window_days\": 21\n    },\n    \"mock_artifact_slug\": null,\n    \"cost\": {\n      \"files\": 2,\n      \"lines\": 40,\n      \"risks\": []\n    },\n    \"exam_ids\": [],\n    \"decision\": null\n  },\n  {\n    \"id\": \"prop_retry_loop\",\n    \"pain\": \"Agent retries the same failing command three times\",\n    \"signal_ids\": [\n      \"sig_20260101_0003\"\n    ],\n    \"heat\": {\n      \"people\": 1,\n      \"window_days\": 7\n    },\n    \"mock_artifact_slug\": null,\n    \"cost\": {\n      \"files\": 2,\n      \"lines\": 60,\n      \"risks\": []\n    },\n    \"exam_ids\": [],\n    \"decision\": null\n  }\n]\n```"
+        },
+        {
+          "agent": "rsi-reviewer-risk",
+          "text": "Table below. I keep undo only as a flag for later.\n\n```json\n[\n  {\n    \"id\": \"prop_bg_tasks\",\n    \"pain\": \"Background task is lost after closing the page\",\n    \"signal_ids\": [\n      \"sig_20260101_0001\",\n      \"sig_20260101_0002\"\n    ],\n    \"heat\": {\n      \"people\": 7,\n      \"window_days\": 14\n    },\n    \"mock_artifact_slug\": null,\n    \"cost\": {\n      \"files\": 4,\n      \"lines\": 180,\n      \"risks\": [\n        \"session teardown\"\n      ]\n    },\n    \"exam_ids\": [],\n    \"decision\": null\n  },\n  {\n    \"id\": \"prop_plain_errors\",\n    \"pain\": \"Error text shows a raw stack trace\",\n    \"signal_ids\": [\n      \"sig_20260101_0007\"\n    ],\n    \"heat\": {\n      \"people\": 2,\n      \"window_days\": 21\n    },\n    \"mock_artifact_slug\": null,\n    \"cost\": {\n      \"files\": 2,\n      \"lines\": 40,\n      \"risks\": [\n        \"hides detail needed to debug\"\n      ]\n    },\n    \"exam_ids\": [],\n    \"decision\": null\n  },\n  {\n    \"id\": \"prop_retry_loop\",\n    \"pain\": \"Agent retries the same failing command three times\",\n    \"signal_ids\": [\n      \"sig_20260101_0003\"\n    ],\n    \"heat\": {\n      \"people\": 1,\n      \"window_days\": 7\n    },\n    \"mock_artifact_slug\": null,\n    \"cost\": {\n      \"files\": 3,\n      \"lines\": 80,\n      \"risks\": []\n    },\n    \"exam_ids\": [],\n    \"decision\": null\n  },\n  {\n    \"id\": \"prop_one_step_undo\",\n    \"pain\": \"No one-step undo of file edits\",\n    \"signal_ids\": [\n      \"sig_20260101_0004\"\n    ],\n    \"heat\": {\n      \"people\": 3,\n      \"window_days\": 30\n    },\n    \"mock_artifact_slug\": null,\n    \"cost\": {\n      \"files\": 8,\n      \"lines\": 290,\n      \"risks\": [\n        \"data loss on bad restore\"\n      ]\n    },\n    \"exam_ids\": [],\n    \"decision\": null\n  }\n]\n```"
+        }
+      ]
+    }
+  ]
+}
