@@ -16,6 +16,7 @@ export function backendSource(api) {
     },
     decide: (id, decision) => api.post(`${BASE}/decisions`, { proposal_id: id, decision }),
     status: async () => (await api.get(`${BASE}/refresh/status`)).github,
+    regress: async () => (await api.get(`${BASE}/regress`)).runs[0] || null,
     // The backend reads Slack itself; when Slack is off or fails, errors say why.
     refresh: async () => { const r = await api.post(`${BASE}/refresh`, {}); return { ...r, errors: r.errors || [] } },
     settings: async () => (await api.get(`${BASE}/settings`)).settings,
@@ -125,9 +126,14 @@ const clock = (t) => new Date(t * 1000).toLocaleTimeString([], { hour: '2-digit'
 export const jobText = (j) => (!j ? '' : j.running ? `GitHub: fetching since ${clock(j.started_at)}…`
   : !j.finished_at ? 'GitHub: not fetched yet' : j.error ? `GitHub: failed at ${clock(j.finished_at)} (${j.error})`
     : `GitHub: ${j.rows} rows at ${clock(j.finished_at)}`)
+/** One line for the latest post-merge regression run. */
+export const regressText = (r) => (!r ? 'Regression: no run yet' : `Regression @ ${r.sha.slice(0, 7)}: `
+  + `${r.counts.pass}/${r.counts.run} pass · ${r.regressions.length ? `${r.regressions.length} regression(s)` : 'no regressions'}`)
 /** The page body. `load` is the data source; `onDecide` saves a choice; `onRefresh` pulls
  *  signals; `onStatus` reads the GitHub job, polled while it runs. */
-export function HarnessRsi({ load, onDecide, onRefresh, onStatus, onSettings, onSaveSettings }) {
+export function HarnessRsi({ load, onDecide, onRefresh, onStatus, onSettings, onSaveSettings, onRegress }) {
+  const [regress, setRegress] = useState(undefined)
+  useEffect(() => { onRegress?.().then(setRegress, () => {}) }, [onRegress])
   const [[data, error], setState] = useState([null, ''])
   const [tab, setTab] = useState('board')
   const [note, setNote] = useState('')
@@ -171,6 +177,7 @@ export function HarnessRsi({ load, onDecide, onRefresh, onStatus, onSettings, on
         onRefresh ? h(Btn, { type: 'button', onClick: refresh, style: { marginLeft: 'auto' } }, 'Refresh signals') : null),
       h('div', { style: muted, 'aria-live': 'polite', 'data-testid': 'note' }, note),
       h('div', { style: muted, 'aria-live': 'polite', 'data-testid': 'github-job' }, jobText(job)),
+      regress !== undefined ? h('div', { style: muted, 'data-testid': 'regress' }, regressText(regress)) : null,
       form && !form.command ? h('div', { style: muted, 'data-testid': 'slack-off' }, slackNote(null)) : null,
       h('div', { role: 'tabpanel', id: 'rsi-panel', 'aria-labelledby': `tab-${tab}` }, body)))
 }
@@ -180,5 +187,5 @@ export default function HarnessRsiPage() {
   const api = useAppApi()
   const src = useMemo(() => backendSource(api), [api])
   return h(HarnessRsi, { load: src.load, onDecide: src.decide, onRefresh: src.refresh, onStatus: src.status,
-    onSettings: src.settings, onSaveSettings: src.saveSettings })
+    onSettings: src.settings, onSaveSettings: src.saveSettings, onRegress: src.regress })
 }
