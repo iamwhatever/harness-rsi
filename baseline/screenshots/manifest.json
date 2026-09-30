@@ -1,0 +1,45 @@
+{
+  "kirocrew_commit": "6d3ec50378c182aa0ccaeb2faf9511cb84c21e51",
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "data": "KiroCrew seed fixture \"rich\" (throwaway home)",
+  "shots": [
+    {
+      "page": "chat",
+      "path": "/chat/dashboard:coder-demo",
+      "file": "chat.png"
+    },
+    {
+      "page": "sidebar-folders",
+      "path": "/chat/dashboard:coder-demo",
+      "file": "sidebar-folders.png"
+    },
+    {
+      "page": "artifacts",
+      "path": "/artifacts",
+      "file": "artifacts.png"
+    },
+    {
+      "page": "apps",
+      "path": "/apps/library",
+      "file": "apps.png"
+    },
+    {
+      "page": "slack-radar",
+      "path": "/apps/slack-radar",
+      "file": "slack-radar.png"
+    },
+    {
+      "page": "issue-radar",
+      "path": "/apps/issue-radar",
+      "file": "issue-radar.png"
+    },
+    {
+      "page": "settings",
+      "path": "/settings",
+      "file": "settings.png"
+    }
+  ]
+}
