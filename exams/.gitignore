@@ -1,0 +1,5 @@
+# Mined exams carry transcript text and must stay hidden: never commit them.
+**/out/
+**/seed/
+**/data/
+**/*.jsonl
