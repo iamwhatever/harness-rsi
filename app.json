@@ -10,11 +10,12 @@
     "One card per proposal: pain, heat (people / days), before vs after, cost, exams",
     "Three buttons per card set the decision: 做 / 不做 / 以后再说",
     "Signals tab ordered by heat, merged duplicates marked",
-    "No cron, no agents, no background work: it only shows data and records your choice"
+    "No cron, no agents, no background work: it shows the shared data, records your choice, and refreshes signals only when you press Refresh"
   ],
   "defaultEnabled": false,
   "platform": {"os": ["macos", "linux", "windows"]},
-  "permissions": {"api": [], "events": [], "mcpTools": [], "storage": false, "cron": false, "spawn": false},
+  "permissions": {"api": ["/api/apps/harness-rsi", "/api/apps/harness-rsi/*", "/api/apps/slack-radar/signals"], "events": [], "mcpTools": [], "storage": false, "network": true, "cron": false, "spawn": false},
+  "backend": {"hooks": {"routes": "backend.routes:register_routes"}},
   "ui": {
     "entry": "index.mjs",
     "pages": [{"route": "/apps/harness-rsi", "label": "Harness RSI", "icon": "ListChecks"}]

@@ -133,3 +133,9 @@ def test_missing_exams_dir_is_a_clear_error(tmp_path):
     )
     assert proc.returncode == 2 and proc.stdout == "" and "Traceback" not in proc.stderr
     assert proc.stderr.startswith("judge: error: exams dir not found")
+
+
+def test_empty_requested_suite_fails_the_verdict(tmp_path):
+    passing = one("exam_bg_task_survives_close", **BG)  # a hidden exam that passes on its own
+    doc = run(tmp_path, passing, ["hidden", "regression"])  # no exam is in the regression suite
+    assert doc["scores"] == {"hidden": 1.0, "regression": 0.0} and doc["verdict"] == "fail"
