@@ -36,7 +36,8 @@ initI18n('en')
 document.documentElement.setAttribute('data-theme', 'dark')
 const load = async () => ({ ...(await loadFixtures()), images: { prop_bg_tasks: { before: '${before}' } } })
 const onRefresh = async () => ({ total: 10, added: 0, errors: [] })
-createRoot(document.getElementById('root')).render(<div className="flex flex-col h-screen bg-bg text-text"><HarnessRsi load={load} onRefresh={onRefresh} /></div>)
+const onStatus = async () => ({ running: false, started_at: null, finished_at: null, rows: null, error: '' })
+createRoot(document.getElementById('root')).render(<div className="flex flex-col h-screen bg-bg text-text"><HarnessRsi load={load} onRefresh={onRefresh} onStatus={onStatus} /></div>)
 `)
 const alias = (name, to) => [{ find: new RegExp(`^${name}$`), replacement: to }, { find: new RegExp(`^${name}/(.*)$`), replacement: `${to}/$1` }]
 const server = await createServer({

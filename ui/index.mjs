@@ -16,6 +16,7 @@ export function backendSource(api) {
       return { proposals: p.proposals, signals: s.signals, images: {} }
     },
     decide: (id, decision) => api.post(`${BASE}/decisions`, { proposal_id: id, decision }),
+    status: async () => (await api.get(`${BASE}/refresh/status`)).github,
     // Slack Radar may be off or missing: GitHub still refreshes, and the reason is shown.
     refresh: async () => {
       let slack = [], errors = []
@@ -102,20 +103,33 @@ export function Signals({ signals }) {
 
 const TABS = [['board', 'Board'], ['signals', 'Signals']]
 const why = (e) => String(e?.message || e)
-/** The page body. `load` is the data source; `onDecide` saves a choice; `onRefresh` pulls signals. */
-export function HarnessRsi({ load, onDecide, onRefresh }) {
+const clock = (t) => new Date(t * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+/** One line for the GitHub job (it runs for minutes after a refresh). */
+export const jobText = (j) => (!j ? '' : j.running ? `GitHub: fetching since ${clock(j.started_at)}…`
+  : !j.finished_at ? 'GitHub: not fetched yet' : j.error ? `GitHub: failed at ${clock(j.finished_at)} (${j.error})`
+    : `GitHub: ${j.rows} rows at ${clock(j.finished_at)}`)
+/** The page body. `load` is the data source; `onDecide` saves a choice; `onRefresh` pulls
+ *  signals; `onStatus` reads the GitHub job, polled while it runs. */
+export function HarnessRsi({ load, onDecide, onRefresh, onStatus }) {
   const [[data, error], setState] = useState([null, ''])
   const [tab, setTab] = useState('board')
   const [note, setNote] = useState('')
   const reload = useCallback(() => load().then((d) => setState([d, '']), (e) => setState([null, why(e)])), [load])
   useEffect(() => { reload() }, [reload])
+  const [job, setJob] = useState(null)
+  useEffect(() => { onStatus?.().then(setJob, () => {}) }, [onStatus])
+  useEffect(() => {
+    if (!job?.running || !onStatus) return undefined
+    const t = setTimeout(() => onStatus().then((j) => { setJob(j); if (!j.running) reload() }, () => setJob({ ...job })), 5000)
+    return () => clearTimeout(t)
+  }, [job, onStatus, reload])
   const decide = (id, decision) => {
     setState(([d]) => [{ ...d, proposals: applyDecision(d.proposals, id, decision) }, ''])
     Promise.resolve(onDecide?.(id, decision)).catch((e) => setNote(`Could not save the decision: ${why(e)}`))
   }
   const refresh = () => {
     setNote('Refreshing signals…')
-    onRefresh().then((r) => { setNote([`Signals: ${r.total} (${r.added} new)`, ...r.errors].join(' · ')); reload() },
+    onRefresh().then((r) => { setNote([`Signals: ${r.total} (${r.added} new)`, ...r.errors].join(' · ')); setJob(r.github || null); reload() },
       (e) => setNote(`Could not refresh: ${why(e)}`))
   }
   const tabStyle = (on) => ({ padding: '6px 12px', borderRadius: 8, border: 0, cursor: 'pointer', fontSize: 14,
@@ -134,6 +148,7 @@ export function HarnessRsi({ load, onDecide, onRefresh }) {
           text))),
         onRefresh ? h(Btn, { type: 'button', onClick: refresh, style: { marginLeft: 'auto' } }, 'Refresh signals') : null),
       h('div', { style: muted, 'aria-live': 'polite', 'data-testid': 'note' }, note),
+      h('div', { style: muted, 'aria-live': 'polite', 'data-testid': 'github-job' }, jobText(job)),
       h('div', { role: 'tabpanel', id: 'rsi-panel', 'aria-labelledby': `tab-${tab}` }, body)))
 }
 
@@ -141,5 +156,5 @@ export function HarnessRsi({ load, onDecide, onRefresh }) {
 export default function HarnessRsiPage() {
   const api = useAppApi()
   const src = useMemo(() => backendSource(api), [api])
-  return h(HarnessRsi, { load: src.load, onDecide: src.decide, onRefresh: src.refresh })
+  return h(HarnessRsi, { load: src.load, onDecide: src.decide, onRefresh: src.refresh, onStatus: src.status })
 }

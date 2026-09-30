@@ -129,3 +129,12 @@ def write_signals(rows):
     with os.fdopen(fd, "w", encoding="utf-8") as fh:
         fh.writelines(json.dumps(r, ensure_ascii=False) + "\n" for r in rows)
     os.replace(tmp, path)
+
+
+def refresh(batches):
+    """Merge ``batches`` into signals.jsonl under the lock; returns ``(total, added)``."""
+    with _LOCK:
+        before = read_signals()
+        rows = merge(before, batches)
+        write_signals(rows)
+        return len(rows), len(rows) - len(before)
