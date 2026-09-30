@@ -147,6 +147,22 @@ async def _refresh(request, ctx):
     return web.json_response({"ok": True, "total": total, "added": added, "errors": [note] if note else [], "github": _job_view()})
 
 
+def regress_runs():
+    """Stored post-merge regression runs, newest first; an unreadable file is left out."""
+    runs = []
+    for path in (store.data_dir() / "regress").glob("*.json"):
+        try:
+            r = json.loads(path.read_text(encoding="utf-8"))
+            runs.append({k: r[k] for k in ("sha", "at", "baseline", "counts", "regressions")})
+        except (OSError, ValueError, KeyError, TypeError):
+            continue
+    return sorted(runs, key=lambda r: r["at"], reverse=True)
+
+
+async def _regress(request, ctx):
+    return web.json_response({"ok": True, "runs": await asyncio.to_thread(regress_runs)})
+
+
 async def _refresh_status(request, ctx):
     return web.json_response({"ok": True, "github": _job_view()})
 
@@ -163,4 +179,5 @@ def register_routes(ctx):
         AppRoute(method="GET", path="/refresh/status", handler=_refresh_status),
         AppRoute(method="GET", path="/settings", handler=_settings_get),
         AppRoute(method="POST", path="/settings", handler=_settings_post),
+        AppRoute(method="GET", path="/regress", handler=_regress),
     ]
