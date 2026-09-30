@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Run one design-crew round into the shared data dir.
 
-Steps: collect signals (GitHub adapter, Slack Radar ``/signals`` when reachable,
+Steps: collect signals (GitHub adapter, Slack via the owner's Slack MCP when set,
 session scanner, trend scout) -> question setter writes hidden exams from the
 signals ONLY, before any proposal exists -> the two reviewers debate for exactly
 ``reduce.ROUNDS`` rounds -> ``reduce.reduce_debate`` -> one HTML mock artifact per
@@ -12,7 +12,8 @@ Data dir (``$HARNESS_RSI_DATA``, default ``~/.kiro/crew/harness-rsi-data``):
 
 Usage: ``python3 crew/run_round.py [--round N] [--repo owner/name] [--reply AGENT=FILE]``.
 ``--reply`` feeds a saved reply for an agent that cannot run under a bare CLI;
-``--github-json`` feeds a saved adapter run.
+``--github-json`` feeds a saved adapter run; ``--slack-mcp CMD`` sets the Slack MCP
+command for this run (else the app's saved settings; none = Slack off).
 """
 
 from __future__ import annotations
@@ -196,13 +197,19 @@ def _gateway(path: str, body: dict | None = None) -> dict:
         return json.load(resp)
 
 
-def slack_collector() -> list[dict]:
-    """Slack Radar's read-only export; [] when the app, its route or a token is missing."""
-    try:
-        return _gateway("/api/apps/slack-radar/signals").get("signals", [])
-    except (KeyError, OSError, ValueError) as exc:
-        print(f"slack radar skipped: {type(exc).__name__}", file=sys.stderr)
-        return []
+def slack_collector(command: str | None) -> Callable[[], list[dict]]:
+    """Slack through the owner's own Slack MCP (read tools only); [] when off or failing."""
+    def collect() -> list[dict]:
+        sys.path.insert(0, str(ROOT))
+        from adapters import slack
+        from backend import settings
+        conf = {**settings.read(), **({"command": command, "args": []} if command else {})}
+        try:
+            return slack.collect(conf)
+        except Exception as exc:  # noqa: BLE001 - one missing source must not stop the round
+            print(f"slack skipped: {type(exc).__name__}", file=sys.stderr)
+            return []
+    return collect
 
 
 def mock_saver(mocks: Path) -> Saver:
@@ -222,11 +229,12 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--repo", default="kirodotdev/KiroCrew")
     ap.add_argument("--reply", action="append", default=[], metavar="AGENT=FILE")
     ap.add_argument("--github-json", help="saved `python -m adapters.github_issues` output")
+    ap.add_argument("--slack-mcp", metavar="CMD", help="Slack MCP command for this run")
     args = ap.parse_args(argv)
     data = Path(os.environ.get("HARNESS_RSI_DATA", Path.home() / ".kiro/crew/harness-rsi-data"))
     replies = dict(r.split("=", 1) for r in args.reply)
     result = run_round(agent=kiro_agent(data / ".run", replies), save_mock=mock_saver(data / "mocks"),
-                       collectors=[github_collector(args.repo, args.github_json), slack_collector],
+                       collectors=[github_collector(args.repo, args.github_json), slack_collector(args.slack_mcp)],
                        data=data, rnd=args.round, day=dt.date.today().strftime("%Y%m%d"))
     print(json.dumps({k: len(v) for k, v in result.items()}))
     return 0

@@ -5,7 +5,6 @@ import { useAppApi } from '@kirocrew/app-sdk'
 import { Badge, Btn, Card, EmptyState, PageHeader } from '@kirocrew/app-sdk/ui'
 
 const BASE = '/api/apps/harness-rsi'
-const SLACK_EXPORT = '/api/apps/slack-radar/signals'
 
 /** The data source over the app backend. `load` answers { proposals, signals, images }
  *  (images[id].before is a screenshot URL of the page today); tests pass fake-data.mjs instead. */
@@ -17,14 +16,32 @@ export function backendSource(api) {
     },
     decide: (id, decision) => api.post(`${BASE}/decisions`, { proposal_id: id, decision }),
     status: async () => (await api.get(`${BASE}/refresh/status`)).github,
-    // Slack Radar may be off or missing: GitHub still refreshes, and the reason is shown.
-    refresh: async () => {
-      let slack = [], errors = []
-      try { slack = (await api.get(SLACK_EXPORT)).signals || [] } catch { errors = ['slack: Slack Radar export not reachable'] }
-      const r = await api.post(`${BASE}/refresh`, { slack })
-      return { ...r, errors: [...errors, ...(r.errors || [])] }
-    },
+    // The backend reads Slack itself; when Slack is off or fails, errors say why.
+    refresh: async () => { const r = await api.post(`${BASE}/refresh`, {}); return { ...r, errors: r.errors || [] } },
+    settings: async () => (await api.get(`${BASE}/settings`)).settings,
+    saveSettings: async (form) => (await api.post(`${BASE}/settings`, parseSettings(form))).settings,
   }
+}
+
+const words = (t) => String(t || '').split(/[\s,]+/).filter(Boolean)
+/** Form strings -> the POST /settings body. */
+export const parseSettings = (f) => ({ command: String(f.command || '').trim(), args: words(f.args),
+  channels: words(f.channels), window_days: Number(f.window_days), workspace_url: String(f.workspace_url || '').trim() })
+export const toForm = (s) => ({ ...s, args: s.args.join(' '), channels: s.channels.join(', '), window_days: String(s.window_days) })
+export const slackNote = (s) => (s?.command ? `Slack: on, reading ${s.channels.length} channel(s) over ${s.window_days} days`
+  : 'Slack collection is off: set the Slack MCP command to turn it on.')
+const FIELDS = [['command', 'Slack MCP command'], ['args', 'Arguments'], ['channels', 'Channel ids'],
+  ['window_days', 'Window (days)'], ['workspace_url', 'Workspace URL (for links)']]
+/** The Slack settings form: stateless, so the page owns the values. */
+export function SettingsForm({ form, onChange, onSave, note }) {
+  const input = { padding: '6px 8px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--panel)',
+    color: 'var(--text)', fontSize: 13, width: '100%' }
+  return h(Card, { 'data-testid': 'settings' },
+    h('div', { style: muted, 'data-testid': 'slack-note' }, slackNote(parseSettings(form))),
+    FIELDS.map(([k, text]) => h('label', { key: k, style: { display: 'block', marginTop: 10, ...muted } }, text,
+      h('input', { name: k, value: form[k] ?? '', style: input, onChange: (e) => onChange({ ...form, [k]: e.target.value }) }))),
+    h('div', { style: row({ alignItems: 'center' }) }, h(Btn, { type: 'button', primary: true, onClick: onSave }, 'Save'),
+      h('span', { style: muted, 'aria-live': 'polite' }, note)))
 }
 
 export const DECISIONS = [['do', '做', 'Doing'], ['skip', '不做', 'Not doing'], ['later', '以后再说', 'Later']]
@@ -101,7 +118,7 @@ export function Signals({ signals }) {
       td(h('code', null, s.source)), td(h(Badge, { variant: s.layer === 'real' ? 'ok' : 'aim' }, s.layer)))))))
 }
 
-const TABS = [['board', 'Board'], ['signals', 'Signals']]
+const TABS = [['board', 'Board'], ['signals', 'Signals'], ['settings', 'Settings']]
 const why = (e) => String(e?.message || e)
 const clock = (t) => new Date(t * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 /** One line for the GitHub job (it runs for minutes after a refresh). */
@@ -110,13 +127,16 @@ export const jobText = (j) => (!j ? '' : j.running ? `GitHub: fetching since ${c
     : `GitHub: ${j.rows} rows at ${clock(j.finished_at)}`)
 /** The page body. `load` is the data source; `onDecide` saves a choice; `onRefresh` pulls
  *  signals; `onStatus` reads the GitHub job, polled while it runs. */
-export function HarnessRsi({ load, onDecide, onRefresh, onStatus }) {
+export function HarnessRsi({ load, onDecide, onRefresh, onStatus, onSettings, onSaveSettings }) {
   const [[data, error], setState] = useState([null, ''])
   const [tab, setTab] = useState('board')
   const [note, setNote] = useState('')
   const reload = useCallback(() => load().then((d) => setState([d, '']), (e) => setState([null, why(e)])), [load])
   useEffect(() => { reload() }, [reload])
   const [job, setJob] = useState(null)
+  const [[form, formNote], setForm] = useState([null, ''])
+  useEffect(() => { onSettings?.().then((v) => setForm([toForm(v), '']), (e) => setForm([null, why(e)])) }, [onSettings])
+  const save = () => onSaveSettings(form).then((v) => setForm([toForm(v), 'Saved']), (e) => setForm([form, `Not saved: ${why(e)}`]))
   useEffect(() => { onStatus?.().then(setJob, () => {}) }, [onStatus])
   useEffect(() => {
     if (!job?.running || !onStatus) return undefined
@@ -136,6 +156,8 @@ export function HarnessRsi({ load, onDecide, onRefresh, onStatus }) {
     background: on ? 'var(--bg-hover)' : 'transparent', color: on ? 'var(--text-strong)' : MUTED })
   const body = error ? h('div', { role: 'alert', style: { color: 'var(--danger)' } }, `Could not load data: ${error}`)
     : !data ? h('div', { style: muted }, 'Loading…')
+      : tab === 'settings' ? (form ? h(SettingsForm, { form, note: formNote, onSave: save,
+        onChange: (f) => setForm([f, ''])}) : h('div', { style: muted }, formNote || 'Loading…'))
       : tab === 'board' ? h(Board, { proposals: data.proposals, images: data.images, onDecide: decide })
         : h(Signals, { signals: data.signals })
   return h('div', { style: { flex: 1, overflowY: 'auto' } },
@@ -149,6 +171,7 @@ export function HarnessRsi({ load, onDecide, onRefresh, onStatus }) {
         onRefresh ? h(Btn, { type: 'button', onClick: refresh, style: { marginLeft: 'auto' } }, 'Refresh signals') : null),
       h('div', { style: muted, 'aria-live': 'polite', 'data-testid': 'note' }, note),
       h('div', { style: muted, 'aria-live': 'polite', 'data-testid': 'github-job' }, jobText(job)),
+      form && !form.command ? h('div', { style: muted, 'data-testid': 'slack-off' }, slackNote(null)) : null,
       h('div', { role: 'tabpanel', id: 'rsi-panel', 'aria-labelledby': `tab-${tab}` }, body)))
 }
 
@@ -156,5 +179,6 @@ export function HarnessRsi({ load, onDecide, onRefresh, onStatus }) {
 export default function HarnessRsiPage() {
   const api = useAppApi()
   const src = useMemo(() => backendSource(api), [api])
-  return h(HarnessRsi, { load: src.load, onDecide: src.decide, onRefresh: src.refresh, onStatus: src.status })
+  return h(HarnessRsi, { load: src.load, onDecide: src.decide, onRefresh: src.refresh, onStatus: src.status,
+    onSettings: src.settings, onSaveSettings: src.saveSettings })
 }

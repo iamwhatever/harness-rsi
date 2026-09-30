@@ -32,7 +32,7 @@ def test_manifest_is_opt_in_with_no_automatic_actions():
         assert not m.get(key), key
     assert m["backend"] == {"hooks": {"routes": "backend.routes:register_routes"}}  # no startup hook, no loop
     perms = m["permissions"]
-    assert perms["api"] == ["/api/apps/harness-rsi", "/api/apps/harness-rsi/*", "/api/apps/slack-radar/signals"]
+    assert perms["api"] == ["/api/apps/harness-rsi", "/api/apps/harness-rsi/*"]  # no Slack Radar route
     assert not any(perms[k] for k in ("events", "mcpTools", "storage", "cron", "spawn"))
     assert (ROOT / "ui" / m["ui"]["entry"]).is_file()
     assert [p["route"] for p in m["ui"]["pages"]] == ["/apps/harness-rsi"]
