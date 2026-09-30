@@ -1,9 +1,11 @@
-"""Backend routes on fake data: schema-valid reads, decision append, nothing on import."""
+"""Backend routes on fake data: schema-valid reads, decision append, refresh merge, nothing on import."""
 
 import asyncio
+import copy
 import json
 import pathlib
 import sys
+import threading
 import types
 
 import pytest
@@ -82,6 +84,68 @@ def test_decision_refusals_write_nothing(data, req, status):
     assert not (data / "decisions.jsonl").exists()
 
 
+def row(sid, source, link, pain, dedup_of=None, people=1):
+    return {"id": sid, "source": source, "links": [f"https://example.com/{link}"], "pain": pain,
+            "mentions": {"count": people, "people": people, "window_days": 1}, "layer": "real",
+            "testable": {"ok": False, "task": None}, "dedup_of": dedup_of}
+
+
+@pytest.fixture
+def job(monkeypatch):
+    monkeypatch.setattr(routes, "JOB", {"task": None, "running": False, "started_at": None,
+                                        "finished_at": None, "rows": None, "error": ""})
+
+
+def test_refresh_merges_slack_now_and_github_when_the_slow_job_ends(data, job, monkeypatch):
+    slack = [row("sig_20260101_0001", "slack:C0FAKE00003", "s/1", "Brand new pain", people=3),
+             row("sig_20260101_0002", "slack:C0FAKE00003", "s/2", "brand new pain!", "sig_20260101_0001"),
+             row("sig_20260101_0099", "github:x/y", "s/3", "not from slack"), {"id": "junk"}]
+    fresh = copy.deepcopy(SIGNALS[6])
+    fresh["mentions"]["count"] = 9  # the same issue again, with a new count
+    github = [fresh, row("sig_20260101_0050", "github:example-org/example-repo", "g/50", "Brand New Pain")]
+    gate, calls = threading.Event(), []
+    monkeypatch.setattr(routes, "github_rows", lambda: (calls.append(1), gate.wait(10), (github, ""))[2])
+
+    async def scenario():
+        req = lambda: Req({"slack": slack})  # noqa: E731
+        first = json.loads((await routes._refresh(req(), None)).text)
+        assert first["added"] == 2 and first["github"]["running"] is True  # Slack merged, GitHub still running
+        second = json.loads((await routes._refresh(req(), None)).text)
+        assert second["added"] == 0 and second["github"]["started_at"] == first["github"]["started_at"]
+        task = routes.JOB["task"]
+        gate.set()
+        await task
+        return json.loads((await routes._refresh_status(Req(), None)).text)["github"]
+
+    done = asyncio.run(scenario())
+    assert calls == [1] and done["running"] is False and done["rows"] == 2 and done["error"] == ""
+    rows = [json.loads(x) for x in (data / "signals.jsonl").read_text().splitlines()]
+    assert all(store.valid("signal", r) for r in rows) and len({r["id"] for r in rows}) == len(rows) == 13
+    by_link = {r["links"][0]: r for r in rows}
+    head = by_link["https://example.com/s/1"]
+    assert head["id"] not in {r["id"] for r in SIGNALS} and head["dedup_of"] is None  # clashing id replaced
+    assert by_link["https://example.com/s/2"]["dedup_of"] == head["id"]
+    assert by_link["https://example.com/g/50"]["dedup_of"] == head["id"]  # same pain across sources
+    assert by_link[SIGNALS[6]["links"][0]]["mentions"]["count"] == 9 and by_link[SIGNALS[6]["links"][0]]["id"] == SIGNALS[6]["id"]
+
+
+def test_a_failed_github_job_reports_and_frees_the_slot(data, job, monkeypatch):
+    monkeypatch.setattr(routes, "github_rows", lambda: ([], "github: TimeoutExpired"))
+
+    async def scenario():
+        await routes._refresh(Req({"slack": []}), None)
+        await routes.JOB["task"]
+        return json.loads((await routes._refresh_status(Req(), None)).text)["github"]
+
+    done = asyncio.run(scenario())
+    assert done["running"] is False and done["error"] == "github: TimeoutExpired" and done["finished_at"]
+
+
+def test_refresh_needs_owner_and_a_body(data, job):
+    assert call(routes._refresh, Req({"slack": []}, internal_auth=True))[0] == 403
+    assert call(routes._refresh, Req({"slack": "x"}))[0] == 400
+
+
 def test_disabled_app_registers_nothing(tmp_path, monkeypatch):
     monkeypatch.setenv("HARNESS_RSI_DATA", str(tmp_path / "d"))
     m = json.loads((ROOT / "app.json").read_text())
@@ -91,5 +155,6 @@ def test_disabled_app_registers_nothing(tmp_path, monkeypatch):
     fake.AppRoute = lambda **kw: kw
     monkeypatch.setitem(sys.modules, "kiro_crew.apps.route_registry", fake)
     got = [(r["method"], r["path"]) for r in routes.register_routes(None)]
-    assert got == [("GET", "/signals"), ("GET", "/proposals"), ("POST", "/decisions")]
+    assert got == [("GET", "/signals"), ("GET", "/proposals"), ("POST", "/decisions"), ("POST", "/refresh"),
+                   ("GET", "/refresh/status")]
     assert not (tmp_path / "d").exists()
