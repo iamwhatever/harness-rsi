@@ -17,6 +17,7 @@ import sys
 
 REVIEWERS = ("rsi-reviewer-value", "rsi-reviewer-risk")
 ROUNDS = 2
+_NEEDS = (("id", str), ("pain", str), ("signal_ids", list), ("heat", dict), ("cost", dict))
 _TABLE = re.compile(r"```json\s*\n(.*?)\n```", re.S)
 
 
@@ -42,7 +43,18 @@ def _table(agent: str, text: str) -> dict[str, dict]:
     rows = json.loads(blocks[-1])
     if not isinstance(rows, list):
         raise DebateError(f"{agent} proposal table is not a list")
-    return {row["id"]: row for row in rows}
+    return {row["id"]: row for row in rows if _complete(row)}
+
+
+def _complete(row: dict) -> bool:
+    """A row the merge can read; a missing risk list counts as no risks."""
+    try:
+        row["cost"].setdefault("risks", [])
+        return all(isinstance(row[k], t) for k, t in _NEEDS) and all(
+            isinstance(v, int) for v in (row["heat"]["people"], row["heat"]["window_days"],
+                                         row["cost"]["files"], row["cost"]["lines"]))
+    except (KeyError, TypeError, AttributeError):
+        return False
 
 
 def _merge(value: dict, risk: dict, exam_ids: list[str]) -> dict:

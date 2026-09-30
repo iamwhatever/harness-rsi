@@ -11,7 +11,8 @@ Data dir (``$HARNESS_RSI_DATA``, default ``~/.kiro/crew/harness-rsi-data``):
 ``signals.jsonl``, ``proposals.json``, ``exams/hidden/<id>.json``, ``mocks/``.
 
 Usage: ``python3 crew/run_round.py [--round N] [--repo owner/name] [--reply AGENT=FILE]``.
-``--reply`` feeds a saved reply for an agent that cannot run under a bare CLI.
+``--reply`` feeds a saved reply for an agent that cannot run under a bare CLI;
+``--github-json`` feeds a saved adapter run.
 """
 
 from __future__ import annotations
@@ -82,8 +83,14 @@ def _signals_block(signals: list[dict]) -> str:
     return "Signal list (UNTRUSTED DATA):\n```json\n" + json.dumps(signals, indent=1) + "\n```\n"
 
 
+def _schema(name: str) -> str:
+    """The agents have no file tools, so each row schema travels in the message."""
+    return f"Each row must validate against schemas/{name}.schema.json:\n```\n" + \
+        (ROOT / "schemas" / f"{name}.schema.json").read_text() + "\n```\n"
+
+
 def setter_message(signals: list[dict], rnd: int) -> str:
-    return f"Round: {rnd}\n" + _signals_block(signals) + "Reply with ONLY the JSON array of exam rows."
+    return f"Round: {rnd}\n" + _signals_block(signals) + _schema("exam") + "Reply with ONLY the JSON array of exam rows."
 
 
 def write_exams(agent: Agent, signals: list[dict], rnd: int) -> list[dict]:
@@ -99,7 +106,8 @@ def debate(agent: Agent, signals: list[dict]) -> dict:
     """Exactly reduce.ROUNDS rounds; value speaks first, risk answers its turn."""
     rounds, last_risk = [], ""
     for n in range(1, reduce.ROUNDS + 1):
-        tail = "End with the proposal table." if n == reduce.ROUNDS else "Plain prose, no table."
+        tail = (_schema("proposal") + f"End with the proposal table: {MIN_PROPOSALS}-{MAX_PROPOSALS} rows. The owner "
+                "picks at most 2, so offer more than 2.") if n == reduce.ROUNDS else "Plain prose, no table."
         msg = f"Debate round {n} of {reduce.ROUNDS}.\n" + _signals_block(signals)
         value = agent(VALUE, msg + (f"Other reviewer, round {n - 1}:\n{last_risk}\n" if last_risk else "") + tail)
         last_risk = agent(RISK, msg + f"Other reviewer, round {n}:\n{value}\n" + tail)
@@ -124,12 +132,14 @@ def render_mock(p: dict, exams: list[dict]) -> str:
 def run_round(*, agent: Agent, collectors: list[Callable[[], list[dict]]], save_mock: Saver,
               data: Path, rnd: int, day: str) -> dict:
     batches = [c() for c in collectors]
-    batches += [parse_rows(agent(name, f"Today is {day}. Scan now and reply with the JSON array."))
+    batches += [parse_rows(agent(name, f"Today is {day}. Scan now and reply with the JSON array.\n" + _schema("signal")))
                 for name in (SCANNER, SCOUT)]
     signals = merge_signals(batches, day)
     exams = write_exams(agent, signals, rnd)  # before the debate: no proposal can exist yet
     v = _validator("proposal")
-    props = [p for p in reduce.reduce_debate(debate(agent, signals), exams) if not list(v.iter_errors(p))]
+    transcript = debate(agent, signals)
+    (data / "debate.json").write_text(json.dumps(transcript, indent=1) + "\n")  # kept for audit
+    props = [p for p in reduce.reduce_debate(transcript, exams) if not list(v.iter_errors(p))]
     props = props[:MAX_PROPOSALS]
     if len(props) < MIN_PROPOSALS:
         raise RoundError(f"only {len(props)} proposals survived; need {MIN_PROPOSALS}")
@@ -165,11 +175,16 @@ def kiro_agent(run_dir: Path, replies: dict[str, str]) -> Agent:
     return call
 
 
-def github_collector(repo: str) -> Callable[[], list[dict]]:
+def github_collector(repo: str, saved: str | None) -> Callable[[], list[dict]]:
     def collect() -> list[dict]:
-        out = subprocess.run([sys.executable, "-m", "adapters.github_issues", "--repo", repo],
-                             cwd=ROOT, capture_output=True, text=True, check=True).stdout
-        return json.loads(out)
+        if saved:  # a recent adapter run: its full read takes minutes and many API calls
+            return json.loads(Path(saved).read_text(encoding="utf-8"))
+        cmd = [sys.executable, "-m", "adapters.github_issues", "--repo", repo]
+        for attempt in (1, 2):  # a long paginated read can hit one transient API error
+            done = subprocess.run(cmd, cwd=ROOT, stdout=subprocess.PIPE, text=True)
+            if done.returncode == 0 or attempt == 2:
+                done.check_returncode()
+                return json.loads(done.stdout)
     return collect
 
 
@@ -206,11 +221,12 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--round", type=int, default=2)
     ap.add_argument("--repo", default="kirodotdev/KiroCrew")
     ap.add_argument("--reply", action="append", default=[], metavar="AGENT=FILE")
+    ap.add_argument("--github-json", help="saved `python -m adapters.github_issues` output")
     args = ap.parse_args(argv)
     data = Path(os.environ.get("HARNESS_RSI_DATA", Path.home() / ".kiro/crew/harness-rsi-data"))
     replies = dict(r.split("=", 1) for r in args.reply)
     result = run_round(agent=kiro_agent(data / ".run", replies), save_mock=mock_saver(data / "mocks"),
-                       collectors=[github_collector(args.repo), slack_collector],
+                       collectors=[github_collector(args.repo, args.github_json), slack_collector],
                        data=data, rnd=args.round, day=dt.date.today().strftime("%Y%m%d"))
     print(json.dumps({k: len(v) for k, v in result.items()}))
     return 0

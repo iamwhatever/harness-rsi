@@ -138,3 +138,17 @@ def test_each_source_is_capped_to_its_hottest_rows():
     kept = mod.merge_signals([rows, [FakeCrew.signal(1, "trend:x", "external")]], "20260930")
     assert len(kept) == mod.PER_SOURCE + 1 and kept[0]["mentions"]["count"] == mod.PER_SOURCE + 10
     assert [s["id"] for s in kept][-1] == f"sig_20260930_{mod.PER_SOURCE + 1:04d}"
+
+
+def test_reviewer_rows_missing_risks_merge_and_broken_rows_drop(tmp_path):
+    class Sloppy(FakeCrew):
+        def prop(self, s):
+            row = FakeCrew.prop(s)
+            del row["cost"]["risks"]
+            if s["id"].endswith("1"):
+                del row["heat"]
+            return row
+
+    _, result, _ = run(tmp_path, Sloppy())
+    assert result["proposals"] and all(p["cost"]["risks"] == [] for p in result["proposals"])
+    assert not any(p["id"].endswith("1") for p in result["proposals"])
