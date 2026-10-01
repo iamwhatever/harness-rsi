@@ -5,7 +5,9 @@ paired metrics on that commit, stores ``$HARNESS_RSI_DATA/regress/<sha>.json`` a
 the most recent earlier run: an exam that passed and now fails, or a paired metric that got worse
 beyond its noise band, is a regression. One JSON summary on stdout; exit 0 clean, 1 regression, 2 error.
 
-``python -m judge.regress promote EXAM_ID`` turns a hidden exam that has had its one round into a
+``--since-last --kirocrew DIR [--build CMD]`` runs only when main's head is new since the newest stored run.
+
+``python -m judge.regress promote EXAM_ID [--used-round N]`` turns a hidden exam that has had its one round into a
 regression exam. It is explicit on purpose: nothing inside a judge run changes an exam.
 """
 
@@ -32,7 +34,7 @@ def _files(root):
     root = pathlib.Path(root)
     if not root.is_dir():
         raise JudgeError(f"exams dir not found: {root.name}")
-    return sorted(root.rglob("*.json"))  # hidden/ and any other subdir count too
+    return sorted(p for p in root.rglob("*.json") if "rejected" not in p.relative_to(root).parts)  # all but audit rejects
 
 
 def _read(path):
@@ -86,16 +88,24 @@ def run(args, runner):
         if args.fetch:
             _git(args.kirocrew, "fetch", "-q", "origin", "main")
         sha = _git(args.kirocrew, "rev-parse", "--verify", f"{args.commit or 'origin/main'}^{{commit}}")
+        if args.since_last and (last := previous(data_dir() / "regress", "")) and last["sha"] == sha:
+            return {"sha": sha, "baseline": sha, "counts": None, "regressions": [], "note": "no new merge since last regress"}
         with tempfile.TemporaryDirectory() as tmp:
             tree = pathlib.Path(tmp) / "kc"
             _git(args.kirocrew, "worktree", "add", "-q", "--detach", str(tree), sha)
             try:
+                if args.build:
+                    built = subprocess.run(["bash", "-c", args.build], cwd=tree, capture_output=True, text=True)
+                    if built.returncode:
+                        raise JudgeError(f"build failed: {built.stderr.strip()[-200:]}")
                 result = runner(exams, tree, metrics)
             finally:
                 _git(args.kirocrew, "worktree", "remove", "--force", str(tree))
-    ok = {e["exam_id"]: e["ok"] for e in result["evidence"] if "exam_id" in e}  # suite-level notes carry no id
+    rows = [e for e in result["evidence"] if "exam_id" in e]  # suite-level notes carry no id
+    ok = {e["exam_id"]: e["ok"] for e in rows if e.get("status") != "error"}  # could not run: no verdict to flip
     now = {"sha": sha, "at": datetime.datetime.now(datetime.timezone.utc).isoformat(), "exams": ok,
            "counts": {"run": len(ok), "pass": sum(ok.values()), "fail": len(ok) - sum(ok.values())},
+           "errors": sorted(e["exam_id"] for e in rows if e.get("status") == "error"),
            "samples": metrics.get("current", {}), "judge": result}
     runs_dir = data_dir() / "regress"
     runs_dir.mkdir(parents=True, exist_ok=True)
@@ -103,18 +113,20 @@ def run(args, runner):
     now["baseline"] = before["sha"] if before else None
     now["regressions"] = diff(now, before, metrics)
     (runs_dir / f"{sha}.json").write_text(json.dumps(now, indent=2) + "\n", encoding="utf-8")
-    summary = {k: now[k] for k in ("sha", "baseline", "counts", "regressions")}
+    summary = {k: now[k] for k in ("sha", "baseline", "counts", "errors", "regressions")}
     summary["note"] = "no baseline: first regress run" if before is None else f"compared with {before['sha']}"
     return summary
 
 
-def promote(exams_dir, exam_id):
+def promote(exams_dir, exam_id, used_round=None):
     for path in _files(exams_dir):
         doc = _read(path)
         items = doc if isinstance(doc, list) else [doc]
         for exam in (e for e in items if e.get("id") == exam_id):
             if exam.get("visibility") != "hidden":
                 raise JudgeError(f"{exam_id} is {exam.get('visibility')}, not hidden")
+            if not exam.get("used_rounds") and used_round is not None:
+                exam["used_rounds"] = [used_round]  # it scored in a round nobody recorded
             if not exam.get("used_rounds"):
                 raise JudgeError(f"{exam_id} has not been used for its hidden round yet")
             exam["visibility"] = "regression"
@@ -131,15 +143,21 @@ def main(argv=None, stdout=None, runner=default_runner):
     ap.add_argument("--exams", default=str(data_dir() / "exams"), help="exam dir (outside git)")
     if argv[:1] == ["promote"]:
         ap.add_argument("exam_id")
+        ap.add_argument("--used-round", type=int, help="record the round it was judged in, when none is recorded")
         args = ap.parse_args(argv[1:])
-        job = lambda: promote(args.exams, args.exam_id)  # noqa: E731
+        job = lambda: promote(args.exams, args.exam_id, args.used_round)  # noqa: E731
     else:
         ap.add_argument("--kirocrew", help="a KiroCrew git clone; the commit runs in a throwaway worktree")
         ap.add_argument("--commit", help="commit to test (default: origin/main)")
         ap.add_argument("--fetch", action="store_true", help="git fetch origin main first")
+        ap.add_argument("--since-last", action="store_true", help="fetch main; run only if its head is new since the last run")
+        ap.add_argument("--build", help="shell command run in the worktree before judging, e.g. the SPA build")
         ap.add_argument("--workdir", help="run in this dir as-is instead of a worktree")
         ap.add_argument("--metrics", help="JSON {current: {metric: [samples]}, pairs?, noise_floor?}")
         args = ap.parse_args(argv)
+        if args.since_last and (args.workdir or args.commit or not args.kirocrew):
+            ap.error("--since-last needs --kirocrew and no --workdir/--commit")
+        args.fetch = args.fetch or args.since_last
         job = lambda: run(args, runner)  # noqa: E731
     try:
         summary = job()

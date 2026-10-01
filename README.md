@@ -22,4 +22,9 @@ Judging one proposal:
 4. Run `python -m judge --exams DIR --workdir DIR --metrics metrics.json < input.json`.
 5. Read `evidence`: one row per exam run, with `status` `pass`, `fail` or `error` and the reason. `error` means the check could not run (missing file, tool or samples). A requested suite that ran 0 exams, or a metrics suite with no metrics file, gets its own `suite` row. Any `error` fails the verdict.
 
+Keeping the exam store honest (exams stay in `$HARNESS_RSI_DATA/exams`, never in git):
+
+- `python -m judge.audit --workdir KC [--fix]` dry-runs every exam against a KiroCrew checkout `KC` with the SPA built, and prints counts: runnable, kept (held back only by this machine: no browser, no SPA, no metric samples) and rejected by reason. `--fix` moves each rejected exam to `exams/rejected/` with its reason in `rejected/reasons.jsonl`, and rewrites a `screenshot_diff` exam as `dom_assert` when its task names one selector and one quoted label. Nothing is deleted.
+- `python -m judge.regress promote EXAM_ID [--used-round N]` makes a judged hidden exam a regression exam (`--used-round` records the round when none was written). `python -m judge.regress --since-last --kirocrew KC --build "cd website && npm ci && npm run build"` fetches KiroCrew main and runs the regression suite once when main has a new head since the last stored run, else reports `no new merge since last regress`. An exam that could not run is listed under `errors`, never as a regression. Hook entry for the always-on loop (no schedule yet): call that command and read exit 0 clean, 1 regression, 2 error.
+
 `fixtures/` holds fake rows for each schema (no real Slack text, names or links). `tests/contract/` validates every fixture, checks cross-references resolve, and asserts known-bad rows are refused. Run `pip install -r requirements.txt && pytest tests/`.
