@@ -10,6 +10,7 @@ incognito/temporary sessions and app-opened sessions are skipped.
 A turn starts at a user/inject/nudge row (a mid-turn steer does not start one)
 and runs to the next start. It succeeds when it has a reply with turn_stats, no
 final error row (transient "retrying" rows do not count) and no user stop.
+First-token latency and tokens come from baseline/collect_latency.py.
 
 Usage: python3 baseline/metrics.py [--home DIR] [--days 14] [--out FILE]
 """
@@ -18,21 +19,15 @@ from __future__ import annotations
 
 import argparse
 import json
-import math
+import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from collect_latency import latency_metrics, pct, ttft_of  # noqa: E402
+
 STARTERS = ("user", "inject", "nudge")
 OWNER_ORIGINS = ("user", None)
-NO_TTFT = "not persisted in transcripts; only emitted as an OTel metric and local telemetry is off"
-
-
-def pct(values: list[float], q: float) -> float | None:
-    """Nearest-rank percentile; None for an empty list."""
-    if not values:
-        return None
-    ordered = sorted(values)
-    return ordered[max(0, math.ceil(q * len(ordered)) - 1)]
 
 
 def is_stop(row: dict) -> bool:
@@ -70,7 +65,7 @@ def session_turns(path: Path) -> list[dict] | None:
         meta = row.get("meta") if isinstance(row.get("meta"), dict) else {}
         if role in STARTERS and not meta.get("steer"):
             turns.append({"ts": row.get("ts"), "typed": role == "user", "elapsed": None,
-                          "credits": 0.0, "reply": False, "error": False, "stop": False, "steer": False})
+                          "credits": 0.0, "ttft": None, "reply": False, "error": False, "stop": False, "steer": False})
             continue
         if not turns:
             continue
@@ -82,6 +77,8 @@ def session_turns(path: Path) -> list[dict] | None:
                 turn["elapsed"] = max(turn["elapsed"] or 0, stats["elapsed_ms"])
             if isinstance(stats.get("credits"), (int, float)):
                 turn["credits"] += stats["credits"]
+            if turn["ttft"] is None:
+                turn["ttft"] = ttft_of(stats)
         turn["error"] |= is_final_error(row)
         turn["stop"] |= is_stop(row)
         turn["steer"] |= role == "user" and bool(meta.get("steer"))
@@ -107,6 +104,7 @@ def compute(home: Path, days: int, now: datetime) -> dict:
         return round(sum(t[k] for t in pool) / len(pool), 4) if pool else None
 
     ok = [t for t in turns if t["reply"] and not t["error"] and not t["stop"]]
+    latency, latency_reasons, coverage = latency_metrics(turns)
     return {
         "schema": "kirocrew-rsi/baseline-metrics/1",
         "generated_at": now.isoformat(timespec="seconds"),
@@ -116,6 +114,7 @@ def compute(home: Path, days: int, now: datetime) -> dict:
             "scope": "owner-opened persistent dashboard sessions; incognito, temporary and app-opened excluded",
             "percentile": "nearest-rank",
             "sessions": sessions,
+            **coverage,
         },
         "metrics": {
             "turn_count": n,
@@ -123,19 +122,17 @@ def compute(home: Path, days: int, now: datetime) -> dict:
             "turn_success_rate": round(len(ok) / n, 4) if n else None,
             "error_rate": rate("error", turns),
             "user_stop_rate": rate("stop", turns),
-            "first_token_latency_ms_p50": None,
-            "first_token_latency_ms_p90": None,
+            "first_token_latency_ms_p50": latency["first_token_latency_ms_p50"],
+            "first_token_latency_ms_p90": latency["first_token_latency_ms_p90"],
             "total_latency_ms_p50": pct(elapsed, 0.5),
             "total_latency_ms_p90": pct(elapsed, 0.9),
-            "tokens_per_turn_p50": None,
+            "tokens_per_turn_p50": latency["tokens_per_turn_p50"],
             "credits_per_turn_p50": pct(credits, 0.5),
             "user_correction_rate": None,
             "steer_rate": rate("steer", typed),
         },
         "null_reasons": {
-            "first_token_latency_ms_p50": NO_TTFT,
-            "first_token_latency_ms_p90": NO_TTFT,
-            "tokens_per_turn_p50": "transcripts record credits per turn, not token counts; see credits_per_turn_p50",
+            **latency_reasons,
             "user_correction_rate": "no correction marker in transcripts; steer_rate (mid-turn owner messages per typed turn) is the nearest proxy",
         },
     }

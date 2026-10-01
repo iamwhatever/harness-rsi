@@ -1,36 +1,37 @@
 {
   "schema": "kirocrew-rsi/baseline-metrics/1",
-  "generated_at": "2026-09-29T21:14:14+00:00",
+  "generated_at": "2026-10-01T07:03:02+00:00",
   "window": {
-    "start": "2026-09-15T21:14:14+00:00",
-    "end": "2026-09-29T21:14:14+00:00",
+    "start": "2026-09-17T07:03:02+00:00",
+    "end": "2026-10-01T07:03:02+00:00",
     "days": 14
   },
   "source": {
     "store": "KiroCrew dashboard session transcripts (dashboard_*.jsonl)",
     "scope": "owner-opened persistent dashboard sessions; incognito, temporary and app-opened excluded",
     "percentile": "nearest-rank",
-    "sessions": 158
+    "sessions": 215,
+    "ttft_turns": 0
   },
   "metrics": {
-    "turn_count": 5084,
-    "owner_typed_turn_count": 1021,
-    "turn_success_rate": 0.8782,
-    "error_rate": 0.0212,
-    "user_stop_rate": 0.0039,
+    "turn_count": 5711,
+    "owner_typed_turn_count": 1153,
+    "turn_success_rate": 0.8955,
+    "error_rate": 0.0191,
+    "user_stop_rate": 0.0033,
     "first_token_latency_ms_p50": null,
     "first_token_latency_ms_p90": null,
-    "total_latency_ms_p50": 35445,
-    "total_latency_ms_p90": 542568,
+    "total_latency_ms_p50": 35618,
+    "total_latency_ms_p90": 530440,
     "tokens_per_turn_p50": null,
-    "credits_per_turn_p50": 8.756,
+    "credits_per_turn_p50": 8.2676,
     "user_correction_rate": null,
-    "steer_rate": 0.0186
+    "steer_rate": 0.0182
   },
   "null_reasons": {
-    "first_token_latency_ms_p50": "not persisted in transcripts; only emitted as an OTel metric and local telemetry is off",
-    "first_token_latency_ms_p90": "not persisted in transcripts; only emitted as an OTel metric and local telemetry is off",
-    "tokens_per_turn_p50": "transcripts record credits per turn, not token counts; see credits_per_turn_p50",
+    "tokens_per_turn_p50": "backend bills credits; no token counts are recorded; credits_per_turn_p50 is the cost metric",
+    "first_token_latency_ms_p50": "no turn in the window carries turn_stats.ttft_ms; KiroCrew stores it only from the build that added the field",
+    "first_token_latency_ms_p90": "no turn in the window carries turn_stats.ttft_ms; KiroCrew stores it only from the build that added the field",
     "user_correction_rate": "no correction marker in transcripts; steer_rate (mid-turn owner messages per typed turn) is the nearest proxy"
   }
 }
