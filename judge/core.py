@@ -12,6 +12,8 @@ import re
 import statistics
 import subprocess
 
+from . import dom
+
 # A pair is read together: neither metric may get worse beyond its noise band, whatever the other did.
 DEFAULT_PAIRS = [("first_token_ms", "success_rate"), ("tokens_per_turn", "task_completion_rate")]
 LOWER_IS_BETTER = {"first_token_ms", "tokens_per_turn", "total_latency_ms", "error_rate", "credits_per_turn",
@@ -54,6 +56,8 @@ def stat(samples, name):
 
 def run_check(check, ctx):
     kind, work = check["kind"], ctx["workdir"]
+    if kind == "dom_assert":
+        return dom.run(check, ctx)
     if kind == "exit_code":
         timeout = check.get("timeout_s", 600)
         try:
