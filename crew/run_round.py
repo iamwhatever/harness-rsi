@@ -233,6 +233,15 @@ def slack_collector(command: str | None) -> Callable[[], list[dict]]:
     return collect
 
 
+def session_collector(days: int = 14) -> Callable[[], list[dict]]:
+    """The owner's own sessions through the miner's pain detectors: signals without an agent turn."""
+    def collect() -> list[dict]:
+        sys.path.insert(0, str(ROOT))
+        from adapters import sessions
+        return sessions.collect(days=days)
+    return collect
+
+
 def mock_saver(mocks: Path) -> Saver:
     """POST /api/artifacts when a gateway token is set; else leave the page for artifact_save."""
     def save(slug: str, title: str, page: str) -> str:
@@ -257,7 +266,8 @@ def main(argv: list[str]) -> int:
     data = Path(os.environ.get("HARNESS_RSI_DATA", Path.home() / ".kiro/crew/harness-rsi-data"))
     replies = dict(r.split("=", 1) for r in args.reply)
     result = run_round(agent=kiro_agent(data / ".run", replies), save_mock=mock_saver(data / "mocks"),
-                       collectors=[github_collector(args.repo, args.github_json), slack_collector(args.slack_mcp)],
+                       collectors=[github_collector(args.repo, args.github_json), slack_collector(args.slack_mcp),
+                                   session_collector()],
                        data=data, rnd=args.round, day=dt.date.today().strftime("%Y%m%d"),
                        check_exam=validate_checker(args.exam_workdir))
     print(json.dumps({k: len(v) for k, v in result.items()}))
