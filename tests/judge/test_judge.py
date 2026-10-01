@@ -123,7 +123,7 @@ def test_reused_hidden_exam_is_refused(tmp_path):
 
 def test_full_fixture_set_skips_retired(tmp_path):
     doc = run(tmp_path, EXAMS, ["new", "hidden", "regression", "metrics"], extra=["--round", "1"])
-    assert "exam_error_plain_sentence" not in {e["exam_id"] for e in doc["evidence"]} and doc["verdict"] == "fail"
+    assert "exam_error_plain_sentence" not in {e.get("exam_id") for e in doc["evidence"]} and doc["verdict"] == "fail"
 
 
 def test_missing_exams_dir_is_a_clear_error(tmp_path):

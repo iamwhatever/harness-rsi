@@ -15,7 +15,14 @@
       "properties": {
         "pr": {"type": "integer", "minimum": 1},
         "repo": {"type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"},
-        "suites": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/suite"}}
+        "suites": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/suite"}},
+        "exam_ids": {
+          "description": "Optional. When present the hidden and new suites run exactly these exams; an unknown id is a setup error.",
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^exam_[a-z0-9_]+$"}
+        }
       }
     },
     "output": {
@@ -48,15 +55,19 @@
           }
         },
         "evidence": {
+          "description": "One entry per exam actually run, plus one entry (`suite`, no `exam_id`) per requested suite that ran 0 exams or had no input.",
           "type": "array",
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["exam_id", "ok", "detail"],
+            "required": ["ok", "status", "detail"],
+            "oneOf": [{"required": ["exam_id"]}, {"required": ["suite"]}],
             "properties": {
               "exam_id": {"type": "string", "pattern": "^exam_[a-z0-9_]+$"},
+              "suite": {"$ref": "#/$defs/suite"},
               "ok": {"type": "boolean"},
-              "detail": {"type": "string"},
+              "status": {"description": "`error`: the check could not run (missing file, tool or samples).", "enum": ["pass", "fail", "error"]},
+              "detail": {"type": "string", "description": "The reason."},
               "url": {"type": "string", "format": "uri"}
             }
           }
