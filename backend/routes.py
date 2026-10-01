@@ -1,11 +1,13 @@
-"""Harness RSI HTTP API under ``/api/apps/harness-rsi``: three reads, three owner-only writes.
+"""Harness RSI HTTP API under ``/api/apps/harness-rsi``: three reads, four owner-only writes.
 
 ``POST /refresh`` reads the allowlisted Slack channels through the owner's own Slack MCP
 server (``adapters.slack``; off while no command is set) and merges those rows at once.
 It also starts ``python -m adapters.github_issues`` as a
 one-shot job (at most one at a time; it takes minutes) whose rows merge when it exits;
 ``GET /refresh/status`` reports that job. ``GET``/``POST /settings`` show and change the
-Slack settings (``backend.settings``). Nothing starts on its own: no startup hook, no timer.
+Slack settings (``backend.settings``). ``POST /round/run`` runs one design-crew round
+(``backend.round_job``) with these same Slack and GitHub sources; ``GET /round/status``
+reports it. Nothing starts on its own: no startup hook, no timer.
 """
 
 import asyncio
@@ -18,7 +20,7 @@ from aiohttp import web
 
 import adapters.slack
 
-from . import settings, store
+from . import round_job, settings, store
 
 APP_NAME = "harness-rsi"
 MAX_BODY = 2 * 1024 * 1024
@@ -139,6 +141,8 @@ async def _github_job():
 async def _refresh(request, ctx):
     if not _owner(request):
         return _err(403, "owner_only", "only the dashboard owner can refresh")
+    if round_job.STATE["running"]:  # the round rewrites signals.jsonl when it ends
+        return _err(409, "round_running", "a round is running; refresh when it ends")
     slack, note = await asyncio.to_thread(slack_rows)
     total, added = await asyncio.to_thread(store.refresh, [slack])
     if not JOB["running"]:  # single-flight: a refresh during a run only reports it
@@ -167,6 +171,24 @@ async def _refresh_status(request, ctx):
     return web.json_response({"ok": True, "github": _job_view()})
 
 
+async def _round_run(request, ctx):
+    if not _owner(request):
+        return _err(403, "owner_only", "only the dashboard owner can run a round")
+    body = await _body(request) or {}
+    rnd = body["round"] if "round" in body else await asyncio.to_thread(round_job.next_round)
+    if not (isinstance(rnd, int) and not isinstance(rnd, bool) and 1 <= rnd <= 9999):
+        return _err(400, "bad_round", "round must be 1-9999")
+    if JOB["running"]:
+        return _err(409, "refresh_running", "a GitHub refresh is running; run the round when it ends")
+    if not round_job.start(rnd, [lambda: github_rows(), lambda: slack_rows()]):  # looked up when the round runs
+        return _err(409, "round_running", "a round is already running")
+    return web.json_response({"ok": True, "round": round_job.view()}, status=202)
+
+
+async def _round_status(request, ctx):
+    return web.json_response({"ok": True, "round": round_job.view()})
+
+
 def register_routes(ctx):
     """Named by ``backend.hooks.routes``; the host calls it only for an enabled app."""
     from kiro_crew.apps.route_registry import AppRoute
@@ -180,4 +202,6 @@ def register_routes(ctx):
         AppRoute(method="GET", path="/settings", handler=_settings_get),
         AppRoute(method="POST", path="/settings", handler=_settings_post),
         AppRoute(method="GET", path="/regress", handler=_regress),
+        AppRoute(method="POST", path="/round/run", handler=_round_run),
+        AppRoute(method="GET", path="/round/status", handler=_round_status),
     ]
