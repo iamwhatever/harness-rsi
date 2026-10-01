@@ -2,6 +2,7 @@
 
 import copy
 import functools
+import importlib.util
 import http.server
 import json
 import pathlib
@@ -96,3 +97,19 @@ def test_dom_assert_in_a_real_browser(tmp_path):
     assert dom.run({**CHECK, "regex": r"^hello · (auto|x)$"}, ctx)[0] is True
     missing = dom.run({**CHECK, "selector": "#nope", "timeout_s": 1}, ctx)
     assert missing[0] is False and missing[1].startswith("#nope")
+
+
+def test_question_setter_writes_only_exams_that_can_run(tmp_path):
+    spec = importlib.util.spec_from_file_location("run_round", ROOT / "crew" / "run_round.py")
+    rr = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(rr)
+    sig = json.loads((ROOT / "fixtures/signals.json").read_text())[0]
+    runs = {**copy.deepcopy(BASE), "id": "exam_runs", "origin": [sig["id"]],
+            "check": {"kind": "exit_code", "cmd": [sys.executable, "-c", "pass"], "expect": 0}}
+    stuck = {**exam(), "origin": [sig["id"]]}  # dom_assert with no built SPA in the workdir
+    reply = json.dumps([runs, stuck])
+    refused = []
+    kept = rr.write_exams(lambda name, msg: reply, [sig], 4, rr.validate_checker(tmp_path), refused)
+    assert [e["id"] for e in kept] == ["exam_runs"]
+    assert [r["id"] for r in refused] == ["exam_dom"]
+    assert refused[0]["detail"] in ("no built SPA: dist/index.html missing", "playwright not installed (pip install playwright)")
