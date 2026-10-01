@@ -16,6 +16,8 @@ export function backendSource(api) {
     },
     decide: (id, decision) => api.post(`${BASE}/decisions`, { proposal_id: id, decision }),
     status: async () => (await api.get(`${BASE}/refresh/status`)).github,
+    round: async () => (await api.get(`${BASE}/round/status`)).round,
+    runRound: async () => (await api.post(`${BASE}/round/run`, {})).round,
     regress: async () => (await api.get(`${BASE}/regress`)).runs[0] || null,
     // The backend reads Slack itself; when Slack is off or fails, errors say why.
     refresh: async () => { const r = await api.post(`${BASE}/refresh`, {}); return { ...r, errors: r.errors || [] } },
@@ -25,20 +27,26 @@ export function backendSource(api) {
 }
 
 const words = (t) => String(t || '').split(/[\s,]+/).filter(Boolean)
-/** Form strings -> the POST /settings body. */
-export const parseSettings = (f) => ({ command: String(f.command || '').trim(), args: words(f.args),
-  channels: words(f.channels), window_days: Number(f.window_days), workspace_url: String(f.workspace_url || '').trim() })
-export const toForm = (s) => ({ ...s, args: s.args.join(' '), channels: s.channels.join(', '), window_days: String(s.window_days) })
-export const slackNote = (s) => (s?.command ? `Slack: on, reading ${s.channels.length} channel(s) over ${s.window_days} days`
+/** Form strings -> the POST /settings body; a blank command keeps the saved one (and its args). */
+export const parseSettings = (f) => {
+  const command = String(f.command || '').trim()
+  return { ...(command ? { command, args: words(f.args) } : {}), channels: words(f.channels),
+    window_days: Number(f.window_days), workspace_url: String(f.workspace_url || '').trim() }
+}
+/** The backend shows only whether a command is set, so its inputs start blank. */
+export const toForm = (s) => ({ saved: s, command: '', args: '', channels: s.channels.join(', '),
+  window_days: String(s.window_days), workspace_url: s.workspace_url })
+export const slackNote = (s) => (s?.command_set ? `Slack: on, reading ${s.channels.length} channel(s) over ${s.window_days} days`
   : 'Slack collection is off: set the Slack MCP command to turn it on.')
-const FIELDS = [['command', 'Slack MCP command'], ['args', 'Arguments'], ['channels', 'Channel ids'],
+const FIELDS = [['command', 'Slack MCP command (blank keeps the saved one)'], ['args', 'Arguments'], ['channels', 'Channel ids'],
   ['window_days', 'Window (days)'], ['workspace_url', 'Workspace URL (for links)']]
 /** The Slack settings form: stateless, so the page owns the values. */
 export function SettingsForm({ form, onChange, onSave, note }) {
   const input = { padding: '6px 8px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--panel)',
     color: 'var(--text)', fontSize: 13, width: '100%' }
   return h(Card, { 'data-testid': 'settings' },
-    h('div', { style: muted, 'data-testid': 'slack-note' }, slackNote(parseSettings(form))),
+    h('div', { 'data-testid': 'slack-configured' }, `Slack MCP command configured: ${form.saved.command_set ? 'yes' : 'no'}`),
+    h('div', { style: muted, 'data-testid': 'slack-note' }, slackNote(form.saved)),
     FIELDS.map(([k, text]) => h('label', { key: k, style: { display: 'block', marginTop: 10, ...muted } }, text,
       h('input', { name: k, value: form[k] ?? '', style: input, onChange: (e) => onChange({ ...form, [k]: e.target.value }) }))),
     h('div', { style: row({ alignItems: 'center' }) }, h(Btn, { type: 'button', primary: true, onClick: onSave }, 'Save'),
@@ -129,9 +137,22 @@ export const jobText = (j) => (!j ? '' : j.running ? `GitHub: fetching since ${c
 /** One line for the latest post-merge regression run. */
 export const regressText = (r) => (!r ? 'Regression: no run yet' : `Regression @ ${r.sha.slice(0, 7)}: `
   + `${r.counts.pass}/${r.counts.run} pass · ${r.regressions.length ? `${r.regressions.length} regression(s)` : 'no regressions'}`)
+/** One line for the design-crew round (it runs for many minutes). */
+export const roundText = (r) => (!r ? '' : r.running ? `Round ${r.round}: running since ${clock(r.started_at)}…`
+  : !r.finished_at ? 'Round: not run yet' : r.error ? `Round ${r.round}: failed at ${clock(r.finished_at)} (${r.error})`
+    : [`Round ${r.round}: ${r.counts.proposals} proposals from ${r.counts.signals} signals at ${clock(r.finished_at)}`,
+      ...r.notes].join(' · '))
+/** Run round, two steps: the first click arms, the second confirms. */
+export function RunRound({ armed, running, onArm, onConfirm, onCancel }) {
+  if (running) return h(Btn, { type: 'button', disabled: true }, 'Round running…')
+  if (!armed) return h(Btn, { type: 'button', onClick: onArm, 'data-testid': 'round-arm' }, 'Run round')
+  return h('span', { style: { display: 'flex', gap: 8 } },
+    h(Btn, { type: 'button', primary: true, onClick: onConfirm, 'data-testid': 'round-confirm' }, 'Confirm: run round'),
+    h(Btn, { type: 'button', onClick: onCancel }, 'Cancel'))
+}
 /** The page body. `load` is the data source; `onDecide` saves a choice; `onRefresh` pulls
  *  signals; `onStatus` reads the GitHub job, polled while it runs. */
-export function HarnessRsi({ load, onDecide, onRefresh, onStatus, onSettings, onSaveSettings, onRegress }) {
+export function HarnessRsi({ load, onDecide, onRefresh, onStatus, onSettings, onSaveSettings, onRegress, onRoundStatus, onRunRound }) {
   const [regress, setRegress] = useState(undefined)
   useEffect(() => { onRegress?.().then(setRegress, () => {}) }, [onRegress])
   const [[data, error], setState] = useState([null, ''])
@@ -149,9 +170,21 @@ export function HarnessRsi({ load, onDecide, onRefresh, onStatus, onSettings, on
     const t = setTimeout(() => onStatus().then((j) => { setJob(j); if (!j.running) reload() }, () => setJob({ ...job })), 5000)
     return () => clearTimeout(t)
   }, [job, onStatus, reload])
+  const [[round, armed], setRound] = useState([null, false])
+  useEffect(() => { onRoundStatus?.().then((r) => setRound([r, false]), () => {}) }, [onRoundStatus])
+  useEffect(() => {
+    if (!round?.running || !onRoundStatus) return undefined
+    const t = setTimeout(() => onRoundStatus().then((r) => { setRound([r, false]); if (!r.running) reload() },
+      () => setRound([{ ...round }, false])), 5000)
+    return () => clearTimeout(t)
+  }, [round, onRoundStatus, reload])
+  const runRound = () => { setRound([round, false]); onRunRound().then((r) => setRound([r, false]), (e) => setNote(`Could not start the round: ${why(e)}`)) }
+  // The card shows the choice at once; the reload then shows what decisions.jsonl holds.
   const decide = (id, decision) => {
     setState(([d]) => [{ ...d, proposals: applyDecision(d.proposals, id, decision) }, ''])
-    Promise.resolve(onDecide?.(id, decision)).catch((e) => setNote(`Could not save the decision: ${why(e)}`))
+    const said = DECISIONS.find((x) => x[0] === decision)[1]
+    Promise.resolve(onDecide?.(id, decision)).then(() => { setNote(`Saved: ${said}`); reload() },
+      (e) => { setNote(`Could not save the decision: ${why(e)}`); reload() })
   }
   const refresh = () => {
     setNote('Refreshing signals…')
@@ -174,11 +207,15 @@ export function HarnessRsi({ load, onDecide, onRefresh, onStatus, onSettings, on
           TABS.map(([id, text]) => h('button', { key: id, type: 'button', role: 'tab', id: `tab-${id}`,
             'aria-selected': tab === id, 'aria-controls': 'rsi-panel', onClick: () => setTab(id), style: tabStyle(tab === id) },
           text))),
-        onRefresh ? h(Btn, { type: 'button', onClick: refresh, style: { marginLeft: 'auto' } }, 'Refresh signals') : null),
+        h('span', { style: { marginLeft: 'auto', display: 'flex', gap: 8 } },
+          onRunRound ? h(RunRound, { armed, running: round?.running, onArm: () => setRound([round, true]),
+            onConfirm: runRound, onCancel: () => setRound([round, false]) }) : null,
+          onRefresh ? h(Btn, { type: 'button', onClick: refresh }, 'Refresh signals') : null)),
       h('div', { style: muted, 'aria-live': 'polite', 'data-testid': 'note' }, note),
       h('div', { style: muted, 'aria-live': 'polite', 'data-testid': 'github-job' }, jobText(job)),
+      h('div', { style: muted, 'aria-live': 'polite', 'data-testid': 'round-job' }, roundText(round)),
       regress !== undefined ? h('div', { style: muted, 'data-testid': 'regress' }, regressText(regress)) : null,
-      form && !form.command ? h('div', { style: muted, 'data-testid': 'slack-off' }, slackNote(null)) : null,
+      form && !form.saved.command_set ? h('div', { style: muted, 'data-testid': 'slack-off' }, slackNote(null)) : null,
       h('div', { role: 'tabpanel', id: 'rsi-panel', 'aria-labelledby': `tab-${tab}` }, body)))
 }
 
@@ -187,5 +224,6 @@ export default function HarnessRsiPage() {
   const api = useAppApi()
   const src = useMemo(() => backendSource(api), [api])
   return h(HarnessRsi, { load: src.load, onDecide: src.decide, onRefresh: src.refresh, onStatus: src.status,
-    onSettings: src.settings, onSaveSettings: src.saveSettings, onRegress: src.regress })
+    onSettings: src.settings, onSaveSettings: src.saveSettings, onRegress: src.regress,
+    onRoundStatus: src.round, onRunRound: src.runRound })
 }

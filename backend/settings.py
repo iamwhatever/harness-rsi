@@ -7,7 +7,8 @@
 * ``channels`` and ``window_days`` only narrow what is read, so they live in the app data
   dir as ``slack-settings.json``.
 
-An empty command means Slack collection is off.
+An empty command means Slack collection is off. Responses carry :func:`public`: whether a
+command is set, never the command or its args.
 """
 
 import json
@@ -56,6 +57,11 @@ def validate(patch, current):
     if not _WORKSPACE_RE.match(new["workspace_url"]):
         errors.append("workspace_url must look like https://yourteam.slack.com")
     return {**new, "args": new["args"] if new["command"] else []}, errors
+
+
+def public(settings):
+    """What a response may show: ``command_set`` instead of the command and its args."""
+    return {"command_set": bool(settings["command"]), **{k: settings[k] for k in ("channels", "window_days", "workspace_url")}}
 
 
 def read():

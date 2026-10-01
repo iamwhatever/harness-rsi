@@ -173,7 +173,8 @@ def test_refresh_works_with_slack_off(data, job, monkeypatch):
 def test_settings_default_off_then_owner_saves_command_to_vault(data, monkeypatch):
     vault = FakeVault()
     monkeypatch.setattr(settings, "_vault", lambda: vault)
-    assert call(routes._settings_get)[1]["settings"] == settings.DEFAULTS
+    assert call(routes._settings_get)[1]["settings"] == settings.public(settings.DEFAULTS)
+    assert call(routes._settings_get)[1]["settings"]["command_set"] is False
     assert settings.DEFAULTS["command"] == "" and settings.DEFAULTS["channels"] == ["C0AGA4Y4NP7"]
     new = {"command": "slack-mcp", "args": ["--read-only"], "channels": ["c0fake00003"], "window_days": 7}
     assert call(routes._settings_post, Req(new, internal_auth=True))[0] == 403
@@ -182,13 +183,17 @@ def test_settings_default_off_then_owner_saves_command_to_vault(data, monkeypatc
     assert call(routes._settings_post, Req({"window_days": 0}))[0] == 400
     assert not vault.saved and not (data / settings.FILE).exists()
     status, body = call(routes._settings_post, Req(new))
-    assert status == 200 and body["settings"]["channels"] == ["C0FAKE00003"]
+    assert status == 200 and body["settings"]["channels"] == ["C0FAKE00003"] and body["settings"]["command_set"] is True
+    shown = json.dumps([body, call(routes._settings_get)[1]])
+    assert "slack-mcp" not in shown and "--read-only" not in shown  # yes/no only, never the value
     assert json.loads(vault.saved[settings.VAULT_NAME]) == {"command": "slack-mcp", "args": ["--read-only"], "workspace_url": ""}
     local = json.loads((data / settings.FILE).read_text())
     assert local == {"channels": ["C0FAKE00003"], "window_days": 7}  # the spawn target never sits in the data dir
     (data / settings.FILE).write_text(json.dumps({"command": "evil", "channels": ["C0FAKE00004"]}))
     got = settings.read()
     assert got["command"] == "slack-mcp" and got["channels"] == ["C0FAKE00004"]
+    assert call(routes._settings_post, Req({"window_days": 9}))[1]["settings"]["command_set"] is True  # kept
+    assert json.loads(vault.saved[settings.VAULT_NAME])["command"] == "slack-mcp"
 
 
 def test_slack_rows_pass_saved_settings_to_the_collector(data, monkeypatch):
