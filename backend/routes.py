@@ -18,7 +18,11 @@ import time
 
 from aiohttp import web
 
-import adapters.slack
+try:  # the gateway loads the backend as a subpackage of the app's own synthetic root
+    from .. import adapters
+    from ..adapters import slack as _slack  # noqa: F401 - binds adapters.slack
+except ImportError:  # tests and the CLI import ``backend`` as a top-level package
+    import adapters.slack
 
 from . import round_job, settings, store
 
