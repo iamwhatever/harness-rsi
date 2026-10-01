@@ -24,8 +24,12 @@ def _run(args, stdin):
     if not args.exams:
         raise JudgeError("no exams dir: pass --exams DIR or set HARNESS_RSI_DATA")
     inp = _load(stdin.read(), "stdin")
-    if not isinstance(inp, dict) or set(inp) != {"pr", "repo", "suites"}:
-        raise JudgeError("input must be an object with exactly pr, repo, suites")
+    if not isinstance(inp, dict) or not {"pr", "repo", "suites"} <= set(inp) <= {"pr", "repo", "suites", "exam_ids"}:
+        raise JudgeError("input must be an object with pr, repo, suites and optional exam_ids")
+    ids = inp.get("exam_ids")
+    good = isinstance(ids, list) and ids and all(isinstance(i, str) for i in ids) and len(set(ids)) == len(ids)
+    if "exam_ids" in inp and not good:
+        raise JudgeError("exam_ids must be a non-empty unique list of exam ids")
     suites = inp["suites"]
     if not isinstance(suites, list) or not suites or len(set(suites)) != len(suites) or not set(suites) <= SUITES:
         raise JudgeError(f"suites must be a non-empty unique list drawn from {sorted(SUITES)}")

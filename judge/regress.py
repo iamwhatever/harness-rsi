@@ -93,7 +93,7 @@ def run(args, runner):
                 result = runner(exams, tree, metrics)
             finally:
                 _git(args.kirocrew, "worktree", "remove", "--force", str(tree))
-    ok = {e["exam_id"]: e["ok"] for e in result["evidence"]}
+    ok = {e["exam_id"]: e["ok"] for e in result["evidence"] if "exam_id" in e}  # suite-level notes carry no id
     now = {"sha": sha, "at": datetime.datetime.now(datetime.timezone.utc).isoformat(), "exams": ok,
            "counts": {"run": len(ok), "pass": sum(ok.values()), "fail": len(ok) - sum(ok.values())},
            "samples": metrics.get("current", {}), "judge": result}

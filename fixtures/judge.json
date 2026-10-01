@@ -1,5 +1,5 @@
 {
-  "input": {"pr": 1, "repo": "example-org/example-repo", "suites": ["hidden", "regression", "metrics"]},
+  "input": {"pr": 1, "repo": "example-org/example-repo", "suites": ["hidden", "regression", "metrics"], "exam_ids": ["exam_bg_task_survives_close"]},
   "output": {
     "verdict": "fail",
     "scores": {"hidden": 1.0, "regression": 0.5, "metrics": 1.0},
@@ -8,10 +8,11 @@
       {"a": "tokens_per_turn", "b": "task_completion_rate", "delta_a": -300.0, "delta_b": -0.04, "ok": false}
     ],
     "evidence": [
-      {"exam_id": "exam_bg_task_survives_close", "ok": true, "detail": "exit 0"},
+      {"exam_id": "exam_bg_task_survives_close", "ok": true, "status": "pass", "detail": "exit 0"},
       {
         "exam_id": "exam_undo_three_files",
         "ok": false,
+        "status": "fail",
         "detail": "sha256 mismatch on workspace/a.txt",
         "url": "https://example.com/fake/judge/run/1"
       }
