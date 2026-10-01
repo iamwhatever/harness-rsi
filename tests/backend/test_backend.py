@@ -210,5 +210,6 @@ def test_disabled_app_registers_nothing(tmp_path, monkeypatch):
     monkeypatch.setitem(sys.modules, "kiro_crew.apps.route_registry", fake)
     got = [(r["method"], r["path"]) for r in routes.register_routes(None)]
     assert got == [("GET", "/signals"), ("GET", "/proposals"), ("POST", "/decisions"), ("POST", "/refresh"),
-                   ("GET", "/refresh/status"), ("GET", "/settings"), ("POST", "/settings"), ("GET", "/regress")]
+                   ("GET", "/refresh/status"), ("GET", "/settings"), ("POST", "/settings"), ("GET", "/regress"),
+                   ("POST", "/round/run"), ("GET", "/round/status")]
     assert not (tmp_path / "d").exists()

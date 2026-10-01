@@ -225,6 +225,9 @@ def slack_collector(command: str | None) -> Callable[[], list[dict]]:
         from adapters import slack
         from backend import settings
         conf = {**settings.read(), **({"command": command, "args": []} if command else {})}
+        if not conf["command"]:  # the saved command sits in the gateway vault, unreadable here
+            print("slack: UNAVAILABLE, this round has no Slack rows. Run it from the board's Run round "
+                  "button, or pass --slack-mcp CMD.", file=sys.stderr)
         try:
             return slack.collect(conf)
         except Exception as exc:  # noqa: BLE001 - one missing source must not stop the round
