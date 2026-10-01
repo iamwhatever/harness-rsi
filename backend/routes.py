@@ -80,7 +80,7 @@ def slack_rows():
 
 
 async def _settings_get(request, ctx):
-    return web.json_response({"ok": True, "settings": await asyncio.to_thread(settings.read)})
+    return web.json_response({"ok": True, "settings": settings.public(await asyncio.to_thread(settings.read))})
 
 
 async def _settings_post(request, ctx):
@@ -96,7 +96,7 @@ async def _settings_post(request, ctx):
         await asyncio.to_thread(settings.write, new)
     except Exception as exc:  # noqa: BLE001 - no vault outside a gateway
         return _err(503, "no_vault", f"settings not saved: {type(exc).__name__}")
-    return web.json_response({"ok": True, "settings": new})
+    return web.json_response({"ok": True, "settings": settings.public(new)})
 
 
 async def _signals(request, ctx):

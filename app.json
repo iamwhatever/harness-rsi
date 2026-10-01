@@ -10,7 +10,7 @@
     "One card per proposal: pain, heat (people / days), before vs after, cost, exams",
     "Three buttons per card set the decision: 做 / 不做 / 以后再说",
     "Signals tab ordered by heat, merged duplicates marked",
-    "No cron, no agents, no background work: it shows the shared data, records your choice, and refreshes signals only when you press Refresh",
+    "No cron, nothing on its own: it shows the shared data, records your choice, refreshes signals when you press Refresh, and runs one design-crew round when you press Run round and confirm",
     "Reads Slack itself through your own Slack MCP server (read tools only, allowlisted channel ids); off until you set the command on the Settings tab"
   ],
   "defaultEnabled": false,
