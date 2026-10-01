@@ -4,8 +4,9 @@
 Steps: collect signals (GitHub adapter, Slack via the owner's Slack MCP when set,
 session scanner, trend scout) -> ``enrich.enrich`` (Slack tasks, cross-source merge)
 -> question setter writes hidden exams from the signals ONLY, before any proposal
-exists -> the two reviewers debate for exactly ``reduce.ROUNDS`` rounds ->
-``reduce.reduce_debate`` -> one HTML mock artifact per proposal. Agents,
+exists -> the two reviewers debate for exactly ``reduce.ROUNDS`` rounds (risk's last
+turn reads ``prior_art``) -> ``reduce.reduce_debate`` -> ``prior_art.apply`` (fixed on
+main = dropped) -> one HTML mock artifact per proposal. Agents,
 collectors and the mock saver are injected, so tests run fakes.
 
 Data dir (``$HARNESS_RSI_DATA``, default ``~/.kiro/crew/harness-rsi-data``):
@@ -36,11 +37,13 @@ from jsonschema import Draft202012Validator
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "crew"))
 import enrich  # noqa: E402
+import prior_art  # noqa: E402
 import reduce  # noqa: E402
 
 Agent = Callable[[str, str], str]  # (agent name, task message) -> reply text
 Checker = Callable[[dict], "tuple[bool, str]"]  # exam row -> (runnable, reason): the judge.validate dry run
 Saver = Callable[[str, str, str], str]  # (slug, title, html) -> saved slug
+Prior = Callable[[list[dict], list[dict]], dict]  # (candidate rows, signals) -> prior_art.search result
 SCANNER, SCOUT, SETTER = "rsi-session-scanner", "rsi-trend-scout", "rsi-question-setter"
 VALUE, RISK = reduce.REVIEWERS
 MIN_PROPOSALS, MAX_PROPOSALS = 3, 5
@@ -123,27 +126,35 @@ def validate_checker(workdir: Path) -> Checker:
     return check
 
 
-def debate(agent: Agent, signals: list[dict]) -> dict:
-    """Exactly reduce.ROUNDS rounds; value speaks first, risk answers its turn."""
-    rounds, last_risk = [], ""
+def debate(agent: Agent, signals: list[dict], prior: Prior | None = None) -> dict:
+    """Exactly reduce.ROUNDS rounds; value speaks first, risk answers (its last turn reads ``prior``)."""
+    rounds, last_risk, found = [], "", {}
     for n in range(1, reduce.ROUNDS + 1):
         tail = (_schema("proposal") + f"End with the proposal table: {MIN_PROPOSALS}-{MAX_PROPOSALS} rows. The owner "
                 "picks at most 2, so offer more than 2.") if n == reduce.ROUNDS else "Plain prose, no table."
         msg = f"Debate round {n} of {reduce.ROUNDS}.\n" + _signals_block(signals)
         value = agent(VALUE, msg + (f"Other reviewer, round {n - 1}:\n{last_risk}\n" if last_risk else "") + tail)
-        last_risk = agent(RISK, msg + f"Other reviewer, round {n}:\n{value}\n" + tail)
+        if prior and n == reduce.ROUNDS:
+            found = prior(parse_rows(value), signals)
+        last_risk = agent(RISK, msg + f"Other reviewer, round {n}:\n{value}\n"
+                          + (prior_art.reviewer_block(found) if n == reduce.ROUNDS else "") + tail)
         rounds.append({"round": n, "turns": [{"agent": VALUE, "text": value}, {"agent": RISK, "text": last_risk}]})
-    return {"rounds": rounds}
+    return {"rounds": rounds, "prior_art": found} if prior else {"rounds": rounds}
 
 
-def render_mock(p: dict, exams: list[dict]) -> str:
+def render_mock(p: dict, exams: list[dict], prior: dict | None = None) -> str:
     """A small clickable page: before/after toggle plus the priority-card facts."""
     e = html.escape
     tasks = "".join(f"<li>{e(x['task'])}</li>" for x in exams if x["id"] in p["exam_ids"])
     risks = "".join(f"<li>{e(r)}</li>" for r in p["cost"]["risks"])
+    v = (prior or {}).get("verdict") or {}  # a "fixed" verdict never gets here: it is dropped
+    link = f'#{v["number"]} <a href="{e(v["url"])}">{e(v["url"])}</a>' if v else ""
+    todo = (f"<p>Next step: help land {link}</p>" if v.get("kind") == "open_pr"
+            else "<p>Next step: build</p>" + (f"<p>Earlier attempt (closed): {link}</p>" if v else ""))
     return f"""<div style="font-family:sans-serif;max-width:640px">
 <h2>{e(p['pain'])}</h2>
 <p>{p['heat']['people']} people / {p['heat']['window_days']} days &middot; ~{p['cost']['files']} files, ~{p['cost']['lines']} lines</p>
+{todo}
 <button onclick="for(const s of document.querySelectorAll('.st'))s.hidden=!s.hidden">Before / after</button>
 <section class="st"><h3>Before</h3><p>{e(p['pain'])}</p></section>
 <section class="st" hidden><h3>After</h3><p>Each check below passes:</p><ul>{tasks}</ul></section>
@@ -151,7 +162,8 @@ def render_mock(p: dict, exams: list[dict]) -> str:
 
 
 def run_round(*, agent: Agent, collectors: list[Callable[[], list[dict]]], save_mock: Saver,
-              data: Path, rnd: int, day: str, check_exam: Checker | None = None) -> dict:
+              data: Path, rnd: int, day: str, check_exam: Checker | None = None,
+              prior: Prior | None = None) -> dict:
     batches = [c() for c in collectors]
     batches += [parse_rows(agent(name, f"Today is {day}. Scan now and reply with the JSON array.\n" + _schema("signal")))
                 for name in (SCANNER, SCOUT)]
@@ -159,21 +171,24 @@ def run_round(*, agent: Agent, collectors: list[Callable[[], list[dict]]], save_
     refused: list[dict] = []
     exams = write_exams(agent, signals, rnd, check_exam, refused)  # before the debate: no proposal can exist yet
     v = _validator("proposal")
-    transcript = debate(agent, signals)
+    transcript = debate(agent, signals, prior)
     (data / "debate.json").write_text(json.dumps(transcript, indent=1) + "\n")  # kept for audit
     props = [p for p in reduce.reduce_debate(transcript, exams) if not list(v.iter_errors(p))]
+    props, dropped = prior_art.apply(props, transcript.get("prior_art", {}))  # fixed on main: dropped
     props = props[:MAX_PROPOSALS]
     if len(props) < MIN_PROPOSALS:
         raise RoundError(f"only {len(props)} proposals survived; need {MIN_PROPOSALS}")
     for p in props:
         slug = f"rsi-r{rnd}-{p['id'][5:].replace('_', '-')}"
-        p["mock_artifact_slug"] = save_mock(slug, f"RSI mock: {p['pain'][:60]}", render_mock(p, exams))
+        page = render_mock(p, exams, transcript.get("prior_art", {}).get(p["id"]))
+        p["mock_artifact_slug"] = save_mock(slug, f"RSI mock: {p['pain'][:60]}", page)
     (data / "exams" / "hidden").mkdir(parents=True, exist_ok=True)
     for x in exams:
         (data / "exams" / "hidden" / f"{x['id']}.json").write_text(json.dumps(x, indent=2) + "\n")
     (data / "signals.jsonl").write_text("".join(json.dumps(s) + "\n" for s in signals))
     (data / "proposals.json").write_text(json.dumps(props, indent=2) + "\n")
-    return {"signals": signals, "exams": exams, "proposals": props, "refused_exams": refused}
+    return {"signals": signals, "exams": exams, "proposals": props, "refused_exams": refused,
+            "dropped_prior_art": dropped}
 
 
 # ---- real wiring (not used by tests) ----
@@ -245,6 +260,15 @@ def session_collector(days: int = 14) -> Callable[[], list[dict]]:
     return collect
 
 
+def gh_prior(rows: list[dict], signals: list[dict]) -> dict:
+    """prior_art over the live GitHub API; {} when the budget is low, and the round goes on."""
+    try:
+        return prior_art.search(rows, signals, prior_art.gh_fetch, today=dt.date.today(), budget=prior_art.gh_budget)
+    except (prior_art.RateLimitLow, subprocess.CalledProcessError) as exc:
+        print(f"prior art skipped: {type(exc).__name__}", file=sys.stderr)
+        return {}
+
+
 def mock_saver(mocks: Path) -> Saver:
     """POST /api/artifacts when a gateway token is set; else leave the page for artifact_save."""
     def save(slug: str, title: str, page: str) -> str:
@@ -272,7 +296,7 @@ def main(argv: list[str]) -> int:
                        collectors=[github_collector(args.repo, args.github_json), slack_collector(args.slack_mcp),
                                    session_collector()],
                        data=data, rnd=args.round, day=dt.date.today().strftime("%Y%m%d"),
-                       check_exam=validate_checker(args.exam_workdir))
+                       check_exam=validate_checker(args.exam_workdir), prior=gh_prior)
     print(json.dumps({k: len(v) for k, v in result.items()}))
     return 0
 
