@@ -19,12 +19,13 @@
     "check": {
       "type": "object",
       "required": ["kind"],
-      "properties": {"kind": {"enum": ["exit_code", "file_assert", "metric_threshold", "screenshot_diff"]}},
+      "properties": {"kind": {"enum": ["exit_code", "file_assert", "metric_threshold", "screenshot_diff", "dom_assert"]}},
       "allOf": [
         {"if": {"properties": {"kind": {"const": "exit_code"}}}, "then": {"$ref": "#/$defs/exit_code"}},
         {"if": {"properties": {"kind": {"const": "file_assert"}}}, "then": {"$ref": "#/$defs/file_assert"}},
         {"if": {"properties": {"kind": {"const": "metric_threshold"}}}, "then": {"$ref": "#/$defs/metric_threshold"}},
-        {"if": {"properties": {"kind": {"const": "screenshot_diff"}}}, "then": {"$ref": "#/$defs/screenshot_diff"}}
+        {"if": {"properties": {"kind": {"const": "screenshot_diff"}}}, "then": {"$ref": "#/$defs/screenshot_diff"}},
+        {"if": {"properties": {"kind": {"const": "dom_assert"}}}, "then": {"$ref": "#/$defs/dom_assert"}}
       ]
     },
     "created_round": {"type": "integer", "minimum": 0},
@@ -77,6 +78,37 @@
       "additionalProperties": false,
       "required": ["kind", "baseline", "max_diff_ratio"],
       "properties": {"kind": true, "baseline": {"type": "string", "minLength": 1}, "max_diff_ratio": {"type": "number", "minimum": 0, "maximum": 1}}
+    },
+    "dom_assert": {
+      "description": "Open the built SPA under `root` at `path`, run `setup`, then read the first `selector` match: it must contain `text` or match `regex`.",
+      "additionalProperties": false,
+      "required": ["kind", "path", "selector"],
+      "oneOf": [{"required": ["text"]}, {"required": ["regex"]}],
+      "properties": {
+        "kind": true,
+        "root": {"description": "SPA dir relative to the workdir, holding index.html. Default `.`.", "type": "string", "minLength": 1},
+        "path": {"type": "string", "pattern": "^/"},
+        "selector": {"description": "CSS selector.", "type": "string", "minLength": 1},
+        "text": {"type": "string", "minLength": 1},
+        "regex": {"type": "string", "minLength": 1},
+        "timeout_s": {"type": "integer", "minimum": 1},
+        "setup": {
+          "description": "`route` and `storage` apply before the page loads; `click`, `fill`, `wait_for` run in order after it loads.",
+          "type": "array",
+          "items": {
+            "oneOf": [
+              {
+                "type": "object", "additionalProperties": false, "required": ["route"],
+                "properties": {"route": {"description": "/api path; a trailing * matches a prefix.", "type": "string", "pattern": "^/api/"}, "json": true, "status": {"type": "integer"}}
+              },
+              {"type": "object", "additionalProperties": false, "required": ["storage"], "properties": {"storage": {"type": "object", "additionalProperties": {"type": "string"}}}},
+              {"type": "object", "additionalProperties": false, "required": ["click"], "properties": {"click": {"type": "string", "minLength": 1}}},
+              {"type": "object", "additionalProperties": false, "required": ["fill"], "properties": {"fill": {"type": "array", "prefixItems": [{"type": "string"}, {"type": "string"}], "minItems": 2, "maxItems": 2}}},
+              {"type": "object", "additionalProperties": false, "required": ["wait_for"], "properties": {"wait_for": {"type": "string", "minLength": 1}}}
+            ]
+          }
+        }
+      }
     }
   }
 }
