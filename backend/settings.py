@@ -13,7 +13,10 @@ An empty command means Slack collection is off.
 import json
 import re
 
-from adapters.slack import CHANNEL_RE, DEFAULT_CHANNELS, DEFAULT_WINDOW_DAYS, check_argv
+try:  # see routes.py: a subpackage in the gateway, top-level in tests and the CLI
+    from ..adapters.slack import CHANNEL_RE, DEFAULT_CHANNELS, DEFAULT_WINDOW_DAYS, check_argv
+except ImportError:
+    from adapters.slack import CHANNEL_RE, DEFAULT_CHANNELS, DEFAULT_WINDOW_DAYS, check_argv
 
 from . import store
 

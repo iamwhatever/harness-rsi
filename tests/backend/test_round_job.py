@@ -121,3 +121,16 @@ def test_cli_round_says_slack_is_unavailable(monkeypatch, capsys):
     monkeypatch.setattr(settings, "read", lambda: dict(settings.DEFAULTS))  # a bare CLI: no vault
     assert round_job.crew().slack_collector(None)() == []
     assert "slack: UNAVAILABLE" in capsys.readouterr().err
+
+
+def test_backend_loads_as_a_subpackage_like_the_gateway_does(monkeypatch):
+    """The host loads routes.py under a synthetic root with no sys.path entry for the app."""
+    import importlib
+    import importlib.machinery
+
+    root = importlib.util.module_from_spec(importlib.machinery.ModuleSpec("rsi_app_root", None, is_package=True))
+    root.__path__ = [str(ROOT)]
+    monkeypatch.setitem(sys.modules, "rsi_app_root", root)
+    mod = importlib.import_module("rsi_app_root.backend.routes")
+    assert mod.adapters.__name__ == "rsi_app_root.adapters" and mod.round_job.__name__ == "rsi_app_root.backend.round_job"
+    assert importlib.import_module("rsi_app_root.backend.settings").CHANNEL_RE.match("C0FAKE00001")
