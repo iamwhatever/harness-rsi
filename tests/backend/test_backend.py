@@ -217,5 +217,6 @@ def test_disabled_app_registers_nothing(tmp_path, monkeypatch):
     assert got == [("GET", "/signals"), ("GET", "/proposals"), ("POST", "/decisions"), ("POST", "/refresh"),
                    ("GET", "/refresh/status"), ("GET", "/settings"), ("POST", "/settings"), ("GET", "/regress"),
                    ("POST", "/round/run"), ("GET", "/round/status"), ("GET", "/schedule"), ("POST", "/schedule"),
-                   ("POST", "/schedule/tick")]
+                   ("POST", "/schedule/tick"), ("GET", "/outcomes"), ("POST", "/outcomes/link"),
+                   ("POST", "/score/run")]
     assert not (tmp_path / "d").exists()

@@ -25,6 +25,9 @@ export function backendSource(api) {
     saveSettings: async (form) => (await api.post(`${BASE}/settings`, parseSettings(form))).settings,
     schedule: () => api.get(`${BASE}/schedule`),
     saveSchedule: async (conf) => (await api.post(`${BASE}/schedule`, conf)).schedule,
+    outcomes: () => api.get(`${BASE}/outcomes`),
+    link: (id, pr) => api.post(`${BASE}/outcomes/link`, { proposal_id: id, pr }),
+    score: () => api.post(`${BASE}/score/run`, {}),
   }
 }
 
@@ -72,6 +75,7 @@ export function ScheduleForm({ conf, onChange, onSave, note }) {
       h('label', { style: field }, 'Hour (0-23, local) ', h('input', { name: 'hour', type: 'number', min: 0, max: 23, value: conf.hour,
         onChange: (e) => onChange({ ...conf, hour: Number(e.target.value) }) }))),
     box('regress_enabled', 'Check the regression exams once a day after new merges'),
+    box('score_enabled', 'Score linked KiroCrew PRs with the judge every hour (never runs fork PRs)'),
     h('label', { style: field }, 'KiroCrew clone for the regression check (absolute path)',
       h('input', { name: 'kirocrew_dir', value: conf.kirocrew_dir, onChange: set('kirocrew_dir'), style: { width: '100%' } })),
     h('div', { style: row({ alignItems: 'center' }) }, h(Btn, { type: 'button', primary: true, onClick: onSave }, 'Save schedule'),
@@ -117,7 +121,34 @@ const Frame = ({ title, children }) => h('figure', { style: { margin: 0, flex: 1
   h('figcaption', { style: label }, title), h('div', { style: frameBox }, children))
 const Section = ({ title, children }) => h('div', null, h('div', { style: label }, title), children)
 
-export function ProposalCard({ proposal: p, before, onDecide }) {
+export const prUrl = (pr) => `https://github.com/${pr.replace('#', '/pull/')}`
+const runText = (r) => `${r.verdict} ${r.pass}/${r.pass + r.fail + r.error}`
+/** The judge's line for one linked PR: base -> head, or why there is no score. */
+export const scoreText = (o) => (o.score.head ? `Judge: base ${runText(o.score.base)} → head ${runText(o.score.head)}`
+  : o.note ? `Not scored: ${o.note}` : 'Not scored yet')
+/** The newest post-merge regress result for the card's exams, or ''. */
+export const regressLine = (o) => {
+  const g = o.regress.at(-1)
+  if (!g) return o.state === 'merged' && o.exam_ids.length ? 'Regress: not run yet' : ''
+  const got = Object.values(g.exams)
+  return `Regress @ ${g.sha.slice(0, 7)}: ${got.filter((x) => x === 'pass').length}/${got.length} pass`
+    + (g.regressions ? ` · ${g.regressions} regression(s)` : '')
+}
+/** A card's product PRs with their scores; with `onLink` a PR number can be linked. */
+export function Outcomes({ proposal: p, outcomes, onLink }) {
+  const submit = (e) => { e.preventDefault(); const n = Number(e.target.elements.pr.value); if (n > 0) onLink(p.id, n) }
+  return h(Section, { title: 'Product PR' }, outcomes.map((o) => h('div', { key: o.pr, 'data-testid': 'outcome',
+    style: { display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginTop: 4 } },
+  h('a', { href: prUrl(o.pr), target: '_blank', rel: 'noreferrer', style: { color: 'var(--accent)' } }, o.pr.split('/').pop()),
+  h(Badge, { variant: o.state === 'merged' ? 'ok' : 'muted' }, o.state),
+  h('span', { 'data-testid': 'score' }, scoreText(o)), h('span', { style: muted }, regressLine(o)))),
+  !outcomes.length ? h('div', { style: muted }, 'No PR linked') : null,
+  onLink ? h('form', { onSubmit: submit, style: row({ marginTop: 6, gap: 8, alignItems: 'center' }) },
+    h('input', { name: 'pr', type: 'number', min: 1, placeholder: 'KiroCrew PR #', 'aria-label': `KiroCrew PR number for: ${p.pain}`,
+      style: { width: 140 } }), h(Btn, { type: 'submit' }, 'Link PR')) : null)
+}
+
+export function ProposalCard({ proposal: p, before, onDecide, outcomes, onLink }) {
   const titleId = `pain-${p.id}`
   const slug = p.mock_artifact_slug
   return h(Card, { role: 'region', 'aria-labelledby': titleId, 'data-testid': 'proposal-card', 'data-id': p.id },
@@ -137,7 +168,8 @@ export function ProposalCard({ proposal: p, before, onDecide }) {
         h('div', { 'data-testid': 'cost' }, `${p.cost.files} files · ${p.cost.lines} lines`),
         h('div', { style: muted }, p.cost.risks.length ? `Risks: ${p.cost.risks.join(', ')}` : 'No known risks')),
       h(Section, { title: 'Exams' }, h('div', { style: { display: 'flex', gap: 6, flexWrap: 'wrap' } },
-        p.exam_ids.map((e) => h(Badge, { key: e, variant: 'muted' }, e))))),
+        p.exam_ids.map((e) => h(Badge, { key: e, variant: 'muted' }, e)))),
+      outcomes || onLink ? h(Outcomes, { proposal: p, outcomes: outcomes || [], onLink }) : null),
     h('div', { role: 'group', 'aria-label': `Decision for: ${p.pain}`, style: row({ gap: 8, alignItems: 'center' }) },
       DECISIONS.map(([value, text]) => h(Btn, { key: value, type: 'button', 'data-decision': value,
         primary: p.decision === value, 'aria-pressed': p.decision === value, onClick: () => onDecide(p.id, value) }, text)),
@@ -145,10 +177,11 @@ export function ProposalCard({ proposal: p, before, onDecide }) {
         p.decision ? `Decided: ${DECISIONS.find((d) => d[0] === p.decision)[2]}` : 'Not decided')))
 }
 
-export function Board({ proposals, images = {}, onDecide }) {
+export function Board({ proposals, images = {}, onDecide, outcomes, onLink }) {
   if (!proposals.length) return h(EmptyState, { icon: null, title: 'No proposals yet' })
   return h('div', { style: { display: 'flex', flexDirection: 'column', gap: 12 } }, byHeat(proposals).map((p) =>
-    h(ProposalCard, { key: p.id, proposal: p, before: images[p.id]?.before, onDecide })))
+    h(ProposalCard, { key: p.id, proposal: p, before: images[p.id]?.before, onDecide,
+      outcomes: outcomes && outcomes.filter((o) => o.card_id === p.id), onLink })))
 }
 
 const COLS = ['Pain', 'People', 'Mentions', 'Days', 'Source', 'Layer']
@@ -176,6 +209,10 @@ export const jobText = (j) => (!j ? '' : j.running ? `GitHub: fetching since ${c
 /** One line for the latest post-merge regression run. */
 export const regressText = (r) => (!r ? 'Regression: no run yet' : `Regression @ ${r.sha.slice(0, 7)}: `
   + `${r.counts.pass}/${r.counts.run} pass · ${r.regressions.length ? `${r.regressions.length} regression(s)` : 'no regressions'}`)
+/** One line for the PR scoring job. */
+export const scoreJobText = (s) => (!s ? '' : s.running ? `Scoring PRs since ${clock(s.started_at)}…`
+  : !s.finished_at ? '' : s.error ? `Scoring failed at ${clock(s.finished_at)} (${s.error})`
+    : `Scored at ${clock(s.finished_at)}: ${s.updated.length} PR(s) changed`)
 /** One line for the design-crew round (it runs for many minutes). */
 export const roundText = (r) => (!r ? '' : r.running ? `Round ${r.round}: running since ${clock(r.started_at)}…`
   : !r.finished_at ? 'Round: not run yet' : r.error ? `Round ${r.round}: failed at ${clock(r.finished_at)} (${r.error})`
@@ -192,7 +229,15 @@ export function RunRound({ armed, running, onArm, onConfirm, onCancel }) {
 /** The page body. `load` is the data source; `onDecide` saves a choice; `onRefresh` pulls
  *  signals; `onStatus` reads the GitHub job, polled while it runs. */
 export function HarnessRsi({ load, onDecide, onRefresh, onStatus, onSettings, onSaveSettings, onRegress, onRoundStatus, onRunRound,
-  onSchedule, onSaveSchedule }) {
+  onSchedule, onSaveSchedule, onOutcomes, onLink, onScore }) {
+  const [out, setOut] = useState(null)
+  const loadOut = useCallback(() => onOutcomes?.().then(setOut, () => {}), [onOutcomes])
+  useEffect(() => { loadOut() }, [loadOut])
+  useEffect(() => {
+    if (!out?.score?.running) return undefined
+    const t = setTimeout(loadOut, 5000)
+    return () => clearTimeout(t)
+  }, [out, loadOut])
   const [[sched, schedNote], setSched] = useState([null, ''])
   useEffect(() => { onSchedule?.().then((v) => setSched([v, '']), () => {}) }, [onSchedule])
   const saveSched = () => onSaveSchedule(sched.schedule).then(() => onSchedule())
@@ -230,6 +275,9 @@ export function HarnessRsi({ load, onDecide, onRefresh, onStatus, onSettings, on
     Promise.resolve(onDecide?.(id, decision)).then(() => { setNote(`Saved: ${said}`); reload() },
       (e) => { setNote(`Could not save the decision: ${why(e)}`); reload() })
   }
+  const failed = (what) => (e) => setNote(`Could not ${what}: ${why(e)}`)
+  const linkPr = (id, n) => onLink(id, n).then(loadOut, failed('link the PR'))
+  const score = () => onScore().then(setOut, failed('start scoring'))
   const refresh = () => {
     setNote('Refreshing signals…')
     onRefresh().then((r) => { setNote([`Signals: ${r.total} (${r.added} new)`, ...r.errors].join(' · ')); setJob(r.github || null); reload() },
@@ -245,7 +293,8 @@ export function HarnessRsi({ load, onDecide, onRefresh, onStatus, onSettings, on
         sched ? h(ScheduleForm, { conf: sched.schedule, note: schedNote, onSave: saveSched,
           onChange: (c) => setSched([{ ...sched, schedule: c }, '']) }) : null)
       : tab === 'board' ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: 12 } },
-        sched ? h(Runs, { runs: sched.runs }) : null, h(Board, { proposals: data.proposals, images: data.images, onDecide: decide }))
+        sched ? h(Runs, { runs: sched.runs }) : null, h(Board, { proposals: data.proposals, images: data.images, onDecide: decide,
+          outcomes: out?.outcomes, onLink: onLink && linkPr }))
         : h(Signals, { signals: data.signals })
   return h('div', { style: { flex: 1, overflowY: 'auto' } },
     h(PageHeader, { title: 'Harness RSI', subtitle: 'Pick what to build next. Nothing runs until you decide.' }),
@@ -258,10 +307,12 @@ export function HarnessRsi({ load, onDecide, onRefresh, onStatus, onSettings, on
         h('span', { style: { marginLeft: 'auto', display: 'flex', gap: 8 } },
           onRunRound ? h(RunRound, { armed, running: round?.running, onArm: () => setRound([round, true]),
             onConfirm: runRound, onCancel: () => setRound([round, false]) }) : null,
+          onScore ? h(Btn, { type: 'button', onClick: score, disabled: !!out?.score?.running }, 'Score PRs') : null,
           onRefresh ? h(Btn, { type: 'button', onClick: refresh }, 'Refresh signals') : null)),
       h('div', { style: muted, 'aria-live': 'polite', 'data-testid': 'note' }, note),
       h('div', { style: muted, 'aria-live': 'polite', 'data-testid': 'github-job' }, jobText(job)),
       h('div', { style: muted, 'aria-live': 'polite', 'data-testid': 'round-job' }, roundText(round)),
+      h('div', { style: muted, 'aria-live': 'polite', 'data-testid': 'score-job' }, scoreJobText(out?.score)),
       regress !== undefined ? h('div', { style: muted, 'data-testid': 'regress' }, regressText(regress)) : null,
       form && !form.saved.command_set ? h('div', { style: muted, 'data-testid': 'slack-off' }, slackNote(null)) : null,
       h('div', { role: 'tabpanel', id: 'rsi-panel', 'aria-labelledby': `tab-${tab}` }, body)))
@@ -273,5 +324,6 @@ export default function HarnessRsiPage() {
   const src = useMemo(() => backendSource(api), [api])
   return h(HarnessRsi, { load: src.load, onDecide: src.decide, onRefresh: src.refresh, onStatus: src.status,
     onSettings: src.settings, onSaveSettings: src.saveSettings, onRegress: src.regress,
-    onRoundStatus: src.round, onRunRound: src.runRound, onSchedule: src.schedule, onSaveSchedule: src.saveSchedule })
+    onRoundStatus: src.round, onRunRound: src.runRound, onSchedule: src.schedule, onSaveSchedule: src.saveSchedule,
+    onOutcomes: src.outcomes, onLink: src.link, onScore: src.score })
 }
