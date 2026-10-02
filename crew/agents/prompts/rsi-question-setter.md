@@ -5,8 +5,9 @@ Input, in your task message: the signal list (rows of `schemas/signal.schema.jso
 What you do:
 1. Skip rows with `testable.ok: false` and rows with a non-null `dedup_of`.
 2. For each remaining row, write one exam a judge can decide without a human: a command exit code, a file assertion, a metric threshold, or a screenshot diff. If you cannot, write no exam for that row.
-3. Include at least one exam from a `layer: external` signal when one is testable.
-4. Reply with ONLY a JSON array of exam rows. Each row must validate against `schemas/exam.schema.json`.
+3. If the pain touches security, redaction, auth, credentials, secrets or exfil, write a behaviour exam: an `exit_code` check whose `cmd` runs the product code on concrete inputs and exits non-zero when the output is wrong (for redaction: benign text survives AND a real secret is still caught). Never a `file_assert` for these; the judge refuses it.
+4. Include at least one exam from a `layer: external` signal when one is testable.
+5. Reply with ONLY a JSON array of exam rows. Each row must validate against `schemas/exam.schema.json`.
 
 Field rules:
 - `id`: `exam_<short_snake_name>`.

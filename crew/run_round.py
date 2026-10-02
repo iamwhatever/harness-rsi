@@ -10,7 +10,10 @@ main = dropped) -> one HTML mock artifact per proposal. Agents,
 collectors and the mock saver are injected, so tests run fakes.
 
 Data dir (``$HARNESS_RSI_DATA``, default ``~/.kiro/crew/harness-rsi-data``):
-``signals.jsonl``, ``proposals.json``, ``exams/hidden/<id>.json``, ``mocks/``.
+``signals.jsonl``, ``proposals.json``, ``exams/hidden/<id>.json``, ``mocks/``. That dir is the round's
+record; with ``bank`` set, each exam is then published into the shared bank (``--bank``, default
+``~/.kiro/crew/harness-rsi-data/exams``) once the judge's dry run passes it, else filed under
+``rejected/`` with its reason. ``--publish ROUND_DIR`` does only that step for an earlier round.
 
 Usage: ``python3 crew/run_round.py --exam-workdir KIROCREW_DIR [--round N] [--repo owner/name] [--reply AGENT=FILE]``.
 ``--reply`` feeds a saved reply for an agent that cannot run under a bare CLI;
@@ -44,6 +47,8 @@ Agent = Callable[[str, str], str]  # (agent name, task message) -> reply text
 Checker = Callable[[dict], "tuple[bool, str]"]  # exam row -> (runnable, reason): the judge.validate dry run
 Saver = Callable[[str, str, str], str]  # (slug, title, html) -> saved slug
 Prior = Callable[[list[dict], list[dict]], dict]  # (candidate rows, signals) -> prior_art.search result
+Classifier = Callable[[dict, list], "tuple[str, str]"]  # (exam, signal/proposal text) -> (status, detail)
+DEFAULT_BANK = Path.home() / ".kiro/crew/harness-rsi-data" / "exams"
 SCANNER, SCOUT, SETTER = "rsi-session-scanner", "rsi-trend-scout", "rsi-question-setter"
 VALUE, RISK = reduce.REVIEWERS
 MIN_PROPOSALS, MAX_PROPOSALS = 3, 5
@@ -126,6 +131,76 @@ def validate_checker(workdir: Path) -> Checker:
     return check
 
 
+def exam_context(exams: list[dict], signals: list[dict], props: list[dict]) -> dict[str, list[str]]:
+    """Per exam: the pain of its origin signals and of every proposal naming it."""
+    pain = {s["id"]: s.get("pain", "") for s in signals}
+    return {x["id"]: [pain.get(o, "") for o in x.get("origin", [])]
+            + [p.get("pain", "") for p in props if x["id"] in p.get("exam_ids", [])] for x in exams}
+
+
+def bank_classifier(workdir: Path) -> Classifier:
+    """judge.audit's dry run (it also probes modules and commands) after the behaviour rule, with context.
+
+    Status ``runnable`` publishes; ``held`` (this host cannot run it, e.g. no browser) waits for the next
+    publish; anything else is a rejection reason.
+    """
+    sys.path.insert(0, str(ROOT))
+    from judge import audit, behaviour
+    work, known = workdir.resolve(), set(json.loads(audit.BASELINE.read_text())["metrics"])
+
+    def classify(row: dict, context: list) -> tuple[str, str]:
+        if why := behaviour.refusal(row, context):
+            return "needs-behaviour-check", why
+        status, detail = audit.classify(row, work, {}, known, 120)
+        return ("held" if status in audit.ENV else status), detail
+    return classify
+
+
+def publish(exams: list[dict], bank: Path, classify: Classifier, context: dict | None = None) -> dict:
+    """Copy exams into the bank's ``hidden/`` once each classifies runnable; file refusals under ``rejected/``.
+
+    Idempotent: an id already in the bank, hidden or rejected, is skipped with a note.
+    """
+    hidden, rejected = bank / "hidden", bank / "rejected"
+    have = {p.stem for d in (hidden, rejected) for p in d.glob("exam_*.json")}
+    out = {"published": 0, "rejected": 0, "held": 0, "skipped": 0, "notes": []}
+    for x in exams:
+        if x["id"] in have:
+            out["skipped"] += 1
+            out["notes"].append(f"{x['id']}: already in the bank, skipped")
+            continue
+        status, detail = classify(x, (context or {}).get(x["id"], []))
+        if status == "held":
+            out["held"] += 1
+            out["notes"].append(f"{x['id']}: held, this host cannot run it: {detail[:120]}")
+            continue
+        target = hidden if status == "runnable" else rejected
+        target.mkdir(parents=True, exist_ok=True)
+        (target / f"{x['id']}.json").write_text(json.dumps(x, indent=2) + "\n")
+        have.add(x["id"])
+        if status == "runnable":
+            out["published"] += 1
+            continue
+        out["rejected"] += 1
+        row = {"exam_id": x["id"], "file": f"{x['id']}.json", "reason": status, "detail": detail[:300],
+               "at": dt.datetime.now(dt.timezone.utc).isoformat()}
+        with (rejected / "reasons.jsonl").open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(row) + "\n")
+    return out
+
+
+def publish_round(round_dir: Path, bank: Path, classify: Classifier) -> dict:
+    """Publish one round dir's ``exams/hidden``; a round written straight into the bank has nothing to add."""
+    src = round_dir / "exams" / "hidden"
+    if src.resolve() == (bank / "hidden").resolve():
+        return {"published": 0, "rejected": 0, "held": 0, "skipped": 0, "notes": ["round dir is the bank"]}
+    exams = [json.loads(p.read_text()) for p in sorted(src.glob("*.json"))]
+    sig = round_dir / "signals.jsonl"
+    signals = [json.loads(line) for line in sig.read_text().splitlines() if line.strip()] if sig.is_file() else []
+    props = json.loads((round_dir / "proposals.json").read_text()) if (round_dir / "proposals.json").is_file() else []
+    return publish(exams, bank, classify, exam_context(exams, signals, props))
+
+
 def debate(agent: Agent, signals: list[dict], prior: Prior | None = None) -> dict:
     """Exactly reduce.ROUNDS rounds; value speaks first, risk answers (its last turn reads ``prior``)."""
     rounds, last_risk, found = [], "", {}
@@ -163,7 +238,7 @@ def render_mock(p: dict, exams: list[dict], prior: dict | None = None) -> str:
 
 def run_round(*, agent: Agent, collectors: list[Callable[[], list[dict]]], save_mock: Saver,
               data: Path, rnd: int, day: str, check_exam: Checker | None = None,
-              prior: Prior | None = None) -> dict:
+              prior: Prior | None = None, bank: Path | None = None, classify_bank: Classifier | None = None) -> dict:
     batches = [c() for c in collectors]
     batches += [parse_rows(agent(name, f"Today is {day}. Scan now and reply with the JSON array.\n" + _schema("signal")))
                 for name in (SCANNER, SCOUT)]
@@ -187,8 +262,11 @@ def run_round(*, agent: Agent, collectors: list[Callable[[], list[dict]]], save_
         (data / "exams" / "hidden" / f"{x['id']}.json").write_text(json.dumps(x, indent=2) + "\n")
     (data / "signals.jsonl").write_text("".join(json.dumps(s) + "\n" for s in signals))
     (data / "proposals.json").write_text(json.dumps(props, indent=2) + "\n")
-    return {"signals": signals, "exams": exams, "proposals": props, "refused_exams": refused,
-            "dropped_prior_art": dropped}
+    out = {"signals": signals, "exams": exams, "proposals": props, "refused_exams": refused,
+           "dropped_prior_art": dropped}
+    if bank and classify_bank:  # the round ends: its exams join the shared bank, validated
+        out["published"] = publish_round(data, bank, classify_bank)
+    return out
 
 
 # ---- real wiring (not used by tests) ----
@@ -289,15 +367,24 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--slack-mcp", metavar="CMD", help="Slack MCP command for this run")
     ap.add_argument("--exam-workdir", type=Path, required=True,
                     help="KiroCrew checkout with the SPA built; every exam is dry-run here before it is written")
+    ap.add_argument("--bank", type=Path, default=DEFAULT_BANK, help="shared exam bank the judge reads")
+    ap.add_argument("--publish", type=Path, metavar="ROUND_DIR", help="only publish this round dir's exams")
     args = ap.parse_args(argv)
+    if args.publish:
+        out = publish_round(args.publish, args.bank, bank_classifier(args.exam_workdir))
+        print(json.dumps({k: v for k, v in out.items() if k != "notes"}))
+        print("\n".join(out["notes"]), file=sys.stderr)
+        return 0
     data = Path(os.environ.get("HARNESS_RSI_DATA", Path.home() / ".kiro/crew/harness-rsi-data"))
     replies = dict(r.split("=", 1) for r in args.reply)
     result = run_round(agent=kiro_agent(data / ".run", replies), save_mock=mock_saver(data / "mocks"),
                        collectors=[github_collector(args.repo, args.github_json), slack_collector(args.slack_mcp),
                                    session_collector()],
                        data=data, rnd=args.round, day=dt.date.today().strftime("%Y%m%d"),
-                       check_exam=validate_checker(args.exam_workdir), prior=gh_prior)
-    print(json.dumps({k: len(v) for k, v in result.items()}))
+                       check_exam=validate_checker(args.exam_workdir), prior=gh_prior,
+                       bank=args.bank, classify_bank=bank_classifier(args.exam_workdir))
+    published = result.pop("published", {})
+    print(json.dumps({**{k: len(v) for k, v in result.items()}, **{k: v for k, v in published.items() if k != "notes"}}))
     return 0
 
 
