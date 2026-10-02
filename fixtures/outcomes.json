@@ -1,0 +1,18 @@
+[
+  {"card_id": "prop_bg_tasks", "decision": "do", "pr": "example-org/example-repo#101", "link": "detected", "state": "merged",
+   "base_sha": "1111111111111111111111111111111111111111", "head_sha": "2222222222222222222222222222222222222222",
+   "merged_sha": "3333333333333333333333333333333333333333", "exam_ids": ["exam_bg_task_survives_close"],
+   "score": {"base": {"sha": "1111111111111111111111111111111111111111", "verdict": "fail", "pass": 0, "fail": 1, "error": 0, "at": "2026-01-02T10:00:00+00:00"},
+             "head": {"sha": "2222222222222222222222222222222222222222", "verdict": "pass", "pass": 1, "fail": 0, "error": 0, "at": "2026-01-02T10:05:00+00:00"},
+             "metrics": [{"a": "first_token_ms", "b": "success_rate", "delta_a": -40.0, "delta_b": 0.0, "ok": true}]},
+   "promoted": ["exam_bg_task_survives_close"],
+   "regress": [{"sha": "3333333333333333333333333333333333333333", "at": "2026-01-03T09:00:00+00:00", "exams": {"exam_bg_task_survives_close": "pass"}, "regressions": 0}],
+   "note": "", "at": "2026-01-03T09:00:00+00:00"},
+  {"card_id": "prop_one_step_undo", "decision": "later", "pr": "example-org/example-repo#102", "link": "board", "state": "open",
+   "base_sha": null, "head_sha": null, "merged_sha": null, "exam_ids": [],
+   "score": {"base": null, "head": null, "metrics": null}, "promoted": [], "regress": [], "note": "", "at": "2026-01-04T09:00:00+00:00"},
+  {"card_id": null, "decision": null, "pr": "example-org/example-repo#103", "link": "backfill", "state": "merged",
+   "base_sha": "4444444444444444444444444444444444444444", "head_sha": "5555555555555555555555555555555555555555",
+   "merged_sha": "6666666666666666666666666666666666666666", "exam_ids": [],
+   "score": {"base": null, "head": null, "metrics": null}, "promoted": [], "regress": [], "note": "no card; no exam", "at": "2026-01-05T09:00:00+00:00"}
+]

@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/iamwhatever/harness-rsi/schemas/outcome.schema.json",
+  "description": "One outcome-ledger row: a card, its decision, one product PR, the judge's runs on base and head, and post-merge regress results. A change appends the whole row; the newest per (card_id, pr) is current.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["card_id", "decision", "pr", "link", "state", "base_sha", "head_sha", "merged_sha", "exam_ids", "score", "promoted", "regress", "note", "at"],
+  "$defs": {
+    "sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "sha_or_null": {"anyOf": [{"$ref": "#/$defs/sha"}, {"type": "null"}]},
+    "exam_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^exam_[a-z0-9_]+$"}},
+    "run": {"anyOf": [{"type": "null"}, {"type": "object", "additionalProperties": false, "required": ["sha", "verdict", "pass", "fail", "error", "at"],
+      "properties": {"sha": {"$ref": "#/$defs/sha"}, "verdict": {"enum": ["pass", "fail", "error"]}, "pass": {"type": "integer", "minimum": 0},
+        "fail": {"type": "integer", "minimum": 0}, "error": {"type": "integer", "minimum": 0}, "at": {"type": "string", "format": "date-time"}}}]}
+  },
+  "properties": {
+    "card_id": {"type": ["string", "null"], "pattern": "^prop_[a-z0-9_]+$", "description": "null: a PR no card asked for"},
+    "decision": {"enum": ["do", "skip", "later", null]},
+    "pr": {"type": "string", "pattern": "^[\\w.-]+/[\\w.-]+#[0-9]+$"},
+    "link": {"enum": ["board", "detected", "backfill"]},
+    "state": {"enum": ["open", "merged", "closed"]},
+    "base_sha": {"$ref": "#/$defs/sha_or_null"},
+    "head_sha": {"$ref": "#/$defs/sha_or_null"},
+    "merged_sha": {"$ref": "#/$defs/sha_or_null"},
+    "exam_ids": {"$ref": "#/$defs/exam_ids"},
+    "score": {"type": "object", "additionalProperties": false, "required": ["base", "head", "metrics"],
+      "properties": {"base": {"$ref": "#/$defs/run"}, "head": {"$ref": "#/$defs/run"},
+        "metrics": {"type": ["array", "null"], "items": {"type": "object"}, "description": "paired metric rows; null when none were measured"}}},
+    "promoted": {"$ref": "#/$defs/exam_ids"},
+    "regress": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["sha", "at", "exams", "regressions"],
+      "properties": {"sha": {"$ref": "#/$defs/sha"}, "at": {"type": "string", "format": "date-time"},
+        "exams": {"type": "object", "additionalProperties": {"enum": ["pass", "fail", "error"]}}, "regressions": {"type": "integer", "minimum": 0}}}},
+    "note": {"type": "string", "maxLength": 200, "description": "\"no exam\", \"no card\", or why a score is missing"},
+    "at": {"type": "string", "format": "date-time"}
+  }
+}
