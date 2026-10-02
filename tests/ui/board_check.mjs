@@ -90,6 +90,35 @@ const ended = { ...roundJob, running: false, finished_at: 2, counts: { signals: 
 assert.match(ui.roundText(ended), /^Round 5: 4 proposals from 12 signals at .* · slack: off$/)
 assert.match(ui.roundText({ ...ended, error: 'only 2 proposals' }), /failed at .*\(only 2 proposals\)$/)
 
+// Schedule: the source reads and saves it; the form starts off and edits each field; the board lists runs.
+const sched = { schedule: { round_enabled: false, regress_enabled: false, weekday: 0, hour: 9, kirocrew_dir: '' }, runs: [] }
+const sapi = { get: async (p) => { assert.equal(p, '/api/apps/harness-rsi/schedule'); return sched },
+  post: async (p, b) => { assert.equal(p, '/api/apps/harness-rsi/schedule'); return { ok: true, schedule: b } } }
+assert.deepEqual(await ui.backendSource(sapi).schedule(), sched)
+assert.deepEqual(await ui.backendSource(sapi).saveSchedule({ ...sched.schedule, round_enabled: true }), { ...sched.schedule, round_enabled: true })
+const edits = []
+const sform = expand(ui.ScheduleForm({ conf: sched.schedule, note: '', onSave: () => edits.push('save'), onChange: (c) => edits.push(c) }))
+const named = (n) => find(sform, (x) => x.props.name === n)[0]
+assert.deepEqual(find(sform, (x) => x.type === 'input' && x.props.type === 'checkbox').map((x) => [x.props.name, x.props.checked]),
+  [['round_enabled', false], ['regress_enabled', false]])
+assert.deepEqual(find([named('weekday')], (x) => x.type === 'option').map(text), ui.DAYS)
+assert.equal(named('weekday').props.value, 0)
+named('round_enabled').props.onChange({ target: { type: 'checkbox', checked: true } })
+named('weekday').props.onChange({ target: { value: '3' } })
+named('hour').props.onChange({ target: { value: '7' } })
+named('kirocrew_dir').props.onChange({ target: { value: '/kc' } })
+find(sform, (x) => x.type === 'button')[0].props.onClick()
+assert.deepEqual(edits, [{ ...sched.schedule, round_enabled: true }, { ...sched.schedule, weekday: 3 }, { ...sched.schedule, hour: 7 },
+  { ...sched.schedule, kirocrew_dir: '/kc' }, 'save'])
+assert.match(text(sform[0]), /nothing posts to Slack, opens a PR or merges/)
+assert.equal(text(find(expand(ui.Runs({ runs: [] })), (x) => x.type === 'td')[0]), 'No scheduled runs yet')
+const runs = [{ kind: 'regress', start: '2026-10-05T09:05:00+00:00', end: '2026-10-05T09:40:00+00:00', sha: 'f00dfeed1234', regressions: 2, error: '' },
+  { kind: 'round', start: '2026-10-05T09:05:00+00:00', end: '2026-10-05T10:05:00+00:00', signals: 12, cards: 3, error: '' }]
+const runRows = find(expand(ui.Runs({ runs })), (x) => x.props['data-testid'] === 'run-row')
+assert.deepEqual(runRows.map((r) => text(r.children[0])), ['Daily regression', 'Weekly round'])
+assert.deepEqual(runRows.map((r) => text(r.children[3])), ['2 regression(s) at f00dfee', '3 cards from 12 signals'])
+assert.equal(ui.runResult({ kind: 'round', error: 'only 2 proposals' }), 'Failed: only 2 proposals')
+
 const calls = []
 const tree = expand(ui.Board({ proposals, onDecide: (id, d) => calls.push([id, d]) }))
 const cards = find(tree, (n) => n.props['data-testid'] === 'proposal-card')
