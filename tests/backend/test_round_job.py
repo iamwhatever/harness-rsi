@@ -113,7 +113,7 @@ def test_exams_dry_run_in_the_schedule_clone(env, monkeypatch, tmp_path):
 
     monkeypatch.setattr(schedule, "read", lambda: {**schedule.DEFAULTS, "kirocrew_dir": str(tmp_path / "kc")})
     checked = []
-    monkeypatch.setattr(round_job.crew(), "validate_checker", lambda wd: checked.append(wd) or (lambda row: (True, "")))
+    monkeypatch.setattr(round_job.crew(), "validate_checker", lambda wd: checked.append(wd) or (lambda row, context: (True, "")))
     done = run(routes._round_run(Req(), None))[1]
     assert done["error"] == "" and done["notes"] == [] and checked == [tmp_path / "kc"]
 

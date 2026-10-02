@@ -24,6 +24,9 @@ _REASONS = [("missing-file", "missing file"), ("missing-image", "missing image")
             ("needs-metrics", "runs, need")]
 _SELECTOR = re.compile(r"`([.#\[][^`]+)`|(\[data-testid=[\"']?[\w-]+[\"']?\])")
 _LABEL = re.compile(r"\"([^\"\n]{1,80})\"|“([^”\n]{1,80})”")
+# A failed run whose last error line is one of these broke on the exam's own code, not the product's behaviour.
+_BROKEN = [("missing-module", re.compile(r"ModuleNotFoundError|ImportError|module '[\w.]+' has no attribute")),
+           ("broken-check", re.compile(r"SyntaxError|NameError|IndentationError|AttributeError|TypeError"))]
 BASELINE = pathlib.Path(__file__).resolve().parents[1] / "baseline/metrics.json"  # what baseline/metrics.py measures
 _FIND = "import importlib.util, sys; sys.exit(importlib.util.find_spec(sys.argv[1]) is None)"
 
@@ -55,6 +58,9 @@ def classify(exam, work, metrics, known, cap, runner=validate):
         code, report = runner(exam, work, None, metrics)
     except Exception as exc:  # e.g. a browser driver that dies on this host: the exam is not at fault
         return "check-crashed", type(exc).__name__
+    if code == 0 and report.get("status") == "fail":
+        if broken := next((k for k, rx in _BROKEN if rx.search(report["detail"])), None):
+            return broken, report["detail"]
     reason = next((k for k, n in _REASONS if n in report["detail"]), "refused")
     return {0: "runnable", 2: "invalid"}.get(code, reason), report["detail"]
 

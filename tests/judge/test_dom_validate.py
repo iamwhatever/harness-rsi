@@ -125,11 +125,12 @@ def test_question_setter_writes_only_exams_that_can_run(tmp_path):
     spec.loader.exec_module(rr)
     sig = json.loads((ROOT / "fixtures/signals.json").read_text())[0]
     runs = {**copy.deepcopy(BASE), "id": "exam_runs", "origin": [sig["id"]],
-            "check": {"kind": "exit_code", "cmd": [sys.executable, "-c", "pass"], "expect": 0}}
+            "check": {"kind": "exit_code", "cmd": [sys.executable, "-c", "raise SystemExit(1)"], "expect": 0}}
     stuck = {**exam(), "origin": [sig["id"]]}  # dom_assert with no built SPA in the workdir
     reply = json.dumps([runs, stuck])
     refused = []
     kept = rr.write_exams(lambda name, msg: reply, [sig], 4, rr.validate_checker(tmp_path), refused)
     assert [e["id"] for e in kept] == ["exam_runs"]
     assert [r["id"] for r in refused] == ["exam_dom"]
-    assert refused[0]["detail"] in ("no built SPA: dist/index.html missing", "playwright not installed (pip install playwright)")
+    assert refused[0]["detail"] in ("held: no built SPA: dist/index.html missing",
+                                     "held: playwright not installed (pip install playwright)")
