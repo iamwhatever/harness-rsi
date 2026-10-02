@@ -2,7 +2,7 @@
 
 Usage: python -m judge.validate EXAM.json --workdir DIR [--shots DIR] [--metrics FILE]
 Exit 0 runnable (the check passed or failed), 1 refused (it could not run), 2 bad exam file.
-A refused exam names what it is missing, e.g. a baseline image nobody produced or a SPA that was never built.
+A refused exam names what it is missing (or a security exam that only reads a file), e.g. a baseline image nobody produced or a SPA that was never built.
 """
 
 import argparse
@@ -12,16 +12,18 @@ import sys
 
 from jsonschema import Draft202012Validator
 
-from . import png
+from . import behaviour, png
 from .core import run_check
 
 SCHEMA = pathlib.Path(__file__).resolve().parents[1] / "schemas" / "exam.schema.json"
 
 
-def validate(exam, workdir, shots=None, metrics=None):
+def validate(exam, workdir, shots=None, metrics=None, context=()):
     errors = [e.message for e in Draft202012Validator(json.loads(SCHEMA.read_text())).iter_errors(exam)]
     if errors:
         return 2, {"exam_id": exam.get("id") if isinstance(exam, dict) else None, "status": "invalid", "detail": "; ".join(errors)}
+    if why := behaviour.refusal(exam, context):  # `context`: signal or proposal text the exam serves
+        return 1, {"exam_id": exam["id"], "status": "refused", "detail": why}
     work = pathlib.Path(workdir).resolve()
     ctx = {"workdir": work, "shots": pathlib.Path(shots) if shots else work / "shots", "metrics": metrics or {},
            "round": None, "comparer": png.diff_ratio}
