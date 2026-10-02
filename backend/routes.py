@@ -7,10 +7,12 @@ one-shot job (at most one at a time; it takes minutes) whose rows merge when it 
 ``GET /refresh/status`` reports that job. ``GET``/``POST /settings`` show and change the
 Slack settings (``backend.settings``). ``POST /round/run`` runs one design-crew round
 (``backend.round_job``) with these same Slack and GitHub sources; ``GET /round/status``
-reports it. Nothing starts on its own: no startup hook, no timer.
+reports it. ``/schedule`` and ``/schedule/tick``: the owner's opt-in weekly round and daily
+regress (``backend.schedule``), off by default. No startup hook, no timer in the gateway.
 """
 
 import asyncio
+import datetime as dt
 import json
 import subprocess
 import sys
@@ -24,13 +26,15 @@ try:  # the gateway loads the backend as a subpackage of the app's own synthetic
 except ImportError:  # tests and the CLI import ``backend`` as a top-level package
     import adapters.slack
 
-from . import round_job, settings, store
+from . import round_job, schedule, settings, store
 
 APP_NAME = "harness-rsi"
 MAX_BODY = 2 * 1024 * 1024
 GITHUB_TIMEOUT_S = 30 * 60
 #: The GitHub job: ``task`` is the running asyncio task, the rest is shown on the board.
 JOB = {"task": None, "running": False, "started_at": None, "finished_at": None, "rows": None, "error": ""}
+CLOCK = lambda: dt.datetime.now().astimezone()  # noqa: E731 - local time; tests pass a fake
+SCHEDULED = set()  # tasks the tick started, held until they end
 
 
 def _err(status, code, message):
@@ -87,20 +91,25 @@ async def _settings_get(request, ctx):
     return web.json_response({"ok": True, "settings": settings.public(await asyncio.to_thread(settings.read))})
 
 
-async def _settings_post(request, ctx):
+async def _save(request, mod, what, show):
+    """Owner-only write of ``mod``'s vault-backed ``what``: validate, then ``mod.write``."""
     if not _owner(request):
-        return _err(403, "owner_only", "only the dashboard owner can change settings")
+        return _err(403, "owner_only", f"only the dashboard owner can change {what}")
     body = await _body(request)
     if body is None:
         return _err(400, "bad_body", "body must be a JSON object")
-    new, errors = settings.validate(body, await asyncio.to_thread(settings.read))
+    new, errors = mod.validate(body, await asyncio.to_thread(mod.read))
     if errors:
-        return _err(400, "bad_settings", "; ".join(errors))
+        return _err(400, f"bad_{what}", "; ".join(errors))
     try:
-        await asyncio.to_thread(settings.write, new)
+        await asyncio.to_thread(mod.write, new)
     except Exception as exc:  # noqa: BLE001 - no vault outside a gateway
-        return _err(503, "no_vault", f"settings not saved: {type(exc).__name__}")
-    return web.json_response({"ok": True, "settings": settings.public(new)})
+        return _err(503, "no_vault", f"{what} not saved: {type(exc).__name__}")
+    return web.json_response({"ok": True, what: show(new)})
+
+
+async def _settings_post(request, ctx):
+    return await _save(request, settings, "settings", settings.public)
 
 
 async def _signals(request, ctx):
@@ -193,6 +202,32 @@ async def _round_status(request, ctx):
     return web.json_response({"ok": True, "round": round_job.view()})
 
 
+async def _schedule_get(request, ctx):
+    conf, runs = await asyncio.to_thread(lambda: (schedule.read(), schedule.runs()))
+    return web.json_response({"ok": True, "schedule": conf, "runs": runs})
+
+
+async def _schedule_post(request, ctx):
+    return await _save(request, schedule, "schedule", dict)
+
+
+async def _schedule_tick(request, ctx):
+    """Called hourly by the app cron; starts only what the owner turned on and is due."""
+    conf = await asyncio.to_thread(schedule.read)
+    rnd = await asyncio.to_thread(round_job.next_round) if conf["round_enabled"] else None
+    app = getattr(request, "app", None) or getattr(ctx, "http_app", None)
+    state = app.get("state") if hasattr(app, "get") else None
+
+    start = lambda: None if JOB["running"] else round_job.start(rnd, [lambda: github_rows(), lambda: slack_rows()])  # noqa: E731
+    out, jobs = schedule.tick(CLOCK, conf, round_job.STATE["running"] or JOB["running"], start,
+                              schedule.run_regress, lambda *note: schedule.push(state, *note))
+    for job in jobs:
+        task = asyncio.get_running_loop().create_task(job)
+        SCHEDULED.add(task)
+        task.add_done_callback(SCHEDULED.discard)
+    return web.json_response({"ok": True, **out})
+
+
 def register_routes(ctx):
     """Named by ``backend.hooks.routes``; the host calls it only for an enabled app."""
     from kiro_crew.apps.route_registry import AppRoute
@@ -208,4 +243,7 @@ def register_routes(ctx):
         AppRoute(method="GET", path="/regress", handler=_regress),
         AppRoute(method="POST", path="/round/run", handler=_round_run),
         AppRoute(method="GET", path="/round/status", handler=_round_status),
+        AppRoute(method="GET", path="/schedule", handler=_schedule_get),
+        AppRoute(method="POST", path="/schedule", handler=_schedule_post),
+        AppRoute(method="POST", path="/schedule/tick", handler=_schedule_tick),
     ]
