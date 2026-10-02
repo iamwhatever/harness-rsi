@@ -42,7 +42,7 @@ def test_manifest_is_opt_in_with_no_automatic_actions():
 
 def test_fake_data_is_a_copy_of_the_fixtures():
     lines = (ROOT / "ui" / "fake-data.mjs").read_text(encoding="utf-8").splitlines()
-    for name in ("proposals", "signals"):
+    for name in ("proposals", "signals", "outcomes"):
         line = next(x for x in lines if x.startswith(f"export const {name} = "))
         assert json.loads(line.split(" = ", 1)[1]) == load(f"fixtures/{name}.json")
 

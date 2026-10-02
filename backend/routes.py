@@ -8,7 +8,10 @@ one-shot job (at most one at a time; it takes minutes) whose rows merge when it 
 Slack settings (``backend.settings``). ``POST /round/run`` runs one design-crew round
 (``backend.round_job``) with these same Slack and GitHub sources; ``GET /round/status``
 reports it. ``/schedule`` and ``/schedule/tick``: the owner's opt-in weekly round and daily
-regress (``backend.schedule``), off by default. No startup hook, no timer in the gateway.
+regress (``backend.schedule``), off by default. ``GET /outcomes`` reads the outcome ledger
+and the scoring job; ``POST /outcomes/link`` links a card to a KiroCrew PR; ``POST /score/run``
+starts ``python -m backend.autoscore`` (single-flight; the tick does when scoring is on).
+No startup hook, no timer in the gateway.
 """
 
 import asyncio
@@ -26,15 +29,18 @@ try:  # the gateway loads the backend as a subpackage of the app's own synthetic
 except ImportError:  # tests and the CLI import ``backend`` as a top-level package
     import adapters.slack
 
-from . import round_job, schedule, settings, store
+from . import ledger, round_job, schedule, settings, store
 
 APP_NAME = "harness-rsi"
 MAX_BODY = 2 * 1024 * 1024
 GITHUB_TIMEOUT_S = 30 * 60
+SCORE_TIMEOUT_S = 6 * 3600
 #: The GitHub job: ``task`` is the running asyncio task, the rest is shown on the board.
 JOB = {"task": None, "running": False, "started_at": None, "finished_at": None, "rows": None, "error": ""}
 CLOCK = lambda: dt.datetime.now().astimezone()  # noqa: E731 - local time; tests pass a fake
 SCHEDULED = set()  # tasks the tick started, held until they end
+#: The scoring job (``backend.autoscore``), shown with ``/outcomes``; ``updated`` lists rows it changed.
+SCORE = {"task": None, "running": False, "started_at": None, "finished_at": None, "updated": None, "error": ""}
 
 
 def _err(status, code, message):
@@ -164,6 +170,61 @@ async def _refresh(request, ctx):
     return web.json_response({"ok": True, "total": total, "added": added, "errors": [note] if note else [], "github": _job_view()})
 
 
+def score_run(kc):
+    """``(updated rows, error)`` from one ``python -m backend.autoscore`` run (exit 3: rate limit)."""
+    try:
+        r = subprocess.run([sys.executable, "-m", "backend.autoscore", "--kirocrew", kc], cwd=store.ROOT,
+                           capture_output=True, text=True, timeout=SCORE_TIMEOUT_S)
+        return (json.loads(r.stdout)["updated"], "") if r.returncode == 0 else (None, f"score: exit {r.returncode}")
+    except (OSError, subprocess.TimeoutExpired, ValueError, KeyError) as exc:
+        return None, f"score: {type(exc).__name__}"
+
+
+async def _score_job(kc):
+    try:
+        SCORE.update(zip(("updated", "error"), await asyncio.to_thread(score_run, kc)))
+    except Exception as exc:  # noqa: BLE001 - the job must always report and release
+        SCORE.update(updated=None, error=f"score: {type(exc).__name__}")
+    finally:
+        SCORE.update(running=False, finished_at=time.time(), task=None)
+
+
+def start_score(kc):
+    """Start the scoring job unless one runs (single-flight); True when started."""
+    if SCORE["running"]:
+        return False
+    SCORE.update(running=True, started_at=time.time(), finished_at=None, updated=None, error="")
+    SCORE["task"] = asyncio.get_running_loop().create_task(_score_job(kc))
+    return True
+
+
+async def _outcomes(request, ctx):
+    score = {k: v for k, v in SCORE.items() if k != "task"}
+    return web.json_response({"ok": True, "outcomes": await asyncio.to_thread(ledger.rows), "score": score})
+
+
+async def _link(request, ctx):
+    if not _owner(request):
+        return _err(403, "owner_only", "only the dashboard owner can link a PR")
+    body = await _body(request) or {}
+    if not (isinstance(n := body.get("pr"), int) and not isinstance(n, bool) and 0 < n < 10**7):
+        return _err(400, "bad_pr", "pr must be a KiroCrew pull request number")
+    if body.get("proposal_id") not in {p["id"] for p in await asyncio.to_thread(store.read_proposals)}:
+        return _err(404, "unknown_proposal", "no such proposal")
+    row = await asyncio.to_thread(ledger.link, body["proposal_id"], f"kirodotdev/KiroCrew#{n}", "board")
+    return web.json_response({"ok": True, "outcome": row})
+
+
+async def _score_post(request, ctx):
+    if not _owner(request):
+        return _err(403, "owner_only", "only the dashboard owner can start scoring")
+    if not (kc := (await asyncio.to_thread(schedule.read))["kirocrew_dir"]):
+        return _err(409, "no_kirocrew", "set the KiroCrew clone on the Settings tab first")
+    if not start_score(kc):
+        return _err(409, "score_running", "scoring is already running")
+    return await _outcomes(request, ctx)
+
+
 def regress_runs():
     """Stored post-merge regression runs, newest first; an unreadable file is left out."""
     runs = []
@@ -221,6 +282,8 @@ async def _schedule_tick(request, ctx):
     start = lambda: None if JOB["running"] else round_job.start(rnd, [lambda: github_rows(), lambda: slack_rows()])  # noqa: E731
     out, jobs = schedule.tick(CLOCK, conf, round_job.STATE["running"] or JOB["running"], start,
                               schedule.run_regress, lambda *note: schedule.push(state, *note))
+    on = conf["score_enabled"] and conf["kirocrew_dir"]
+    out["score"] = "off" if not on else "started" if start_score(conf["kirocrew_dir"]) else "busy"
     for job in jobs:
         task = asyncio.get_running_loop().create_task(job)
         SCHEDULED.add(task)
@@ -246,4 +309,7 @@ def register_routes(ctx):
         AppRoute(method="GET", path="/schedule", handler=_schedule_get),
         AppRoute(method="POST", path="/schedule", handler=_schedule_post),
         AppRoute(method="POST", path="/schedule/tick", handler=_schedule_tick),
+        AppRoute(method="GET", path="/outcomes", handler=_outcomes),
+        AppRoute(method="POST", path="/outcomes/link", handler=_link),
+        AppRoute(method="POST", path="/score/run", handler=_score_post),
     ]
