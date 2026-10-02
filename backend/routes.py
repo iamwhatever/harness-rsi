@@ -6,7 +6,7 @@ It also starts ``python -m adapters.github_issues`` as a
 one-shot job (at most one at a time; it takes minutes) whose rows merge when it exits;
 ``GET /refresh/status`` reports that job. ``GET``/``POST /settings`` show and change the
 Slack settings (``backend.settings``). ``POST /round/run`` runs one design-crew round
-(``backend.round_job``) with these same Slack and GitHub sources; ``GET /round/status``
+(``backend.round_job``) with these same Slack and GitHub sources plus the owner's sessions; ``GET /round/status``
 reports it. ``/schedule`` and ``/schedule/tick``: the owner's opt-in weekly round and daily
 regress (``backend.schedule``), off by default. No startup hook, no timer in the gateway.
 """
@@ -22,8 +22,10 @@ from aiohttp import web
 
 try:  # the gateway loads the backend as a subpackage of the app's own synthetic root
     from .. import adapters
+    from ..adapters import sessions as _sessions  # noqa: F401 - binds adapters.sessions
     from ..adapters import slack as _slack  # noqa: F401 - binds adapters.slack
 except ImportError:  # tests and the CLI import ``backend`` as a top-level package
+    import adapters.sessions
     import adapters.slack
 
 from . import round_job, schedule, settings, store
@@ -85,6 +87,19 @@ def slack_rows():
         return adapters.slack.collect(conf), ""
     except Exception as exc:  # noqa: BLE001 - a Slack failure must not stop the GitHub refresh
         return [], f"slack: {type(exc).__name__}"
+
+
+def session_rows():
+    """Signal rows from the owner's own dashboard sessions (``adapters.sessions``), or ``([], note)``."""
+    try:
+        return adapters.sessions.collect(), ""
+    except Exception as exc:  # noqa: BLE001 - a session read failure must not stop the round
+        return [], f"sessions: {type(exc).__name__}"
+
+
+def round_sources():
+    """The round's collectors, looked up when the round runs: GitHub, Slack, the owner's sessions."""
+    return [lambda: github_rows(), lambda: slack_rows(), lambda: session_rows()]
 
 
 async def _settings_get(request, ctx):
@@ -193,7 +208,7 @@ async def _round_run(request, ctx):
         return _err(400, "bad_round", "round must be 1-9999")
     if JOB["running"]:
         return _err(409, "refresh_running", "a GitHub refresh is running; run the round when it ends")
-    if not round_job.start(rnd, [lambda: github_rows(), lambda: slack_rows()]):  # looked up when the round runs
+    if not round_job.start(rnd, round_sources()):
         return _err(409, "round_running", "a round is already running")
     return web.json_response({"ok": True, "round": round_job.view()}, status=202)
 
@@ -218,7 +233,7 @@ async def _schedule_tick(request, ctx):
     app = getattr(request, "app", None) or getattr(ctx, "http_app", None)
     state = app.get("state") if hasattr(app, "get") else None
 
-    start = lambda: None if JOB["running"] else round_job.start(rnd, [lambda: github_rows(), lambda: slack_rows()])  # noqa: E731
+    start = lambda: None if JOB["running"] else round_job.start(rnd, round_sources())  # noqa: E731
     out, jobs = schedule.tick(CLOCK, conf, round_job.STATE["running"] or JOB["running"], start,
                               schedule.run_regress, lambda *note: schedule.push(state, *note))
     for job in jobs:

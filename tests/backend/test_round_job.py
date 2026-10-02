@@ -18,6 +18,10 @@ _crew_tests = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_crew_tests)
 FakeCrew, SIGNALS = _crew_tests.FakeCrew, _crew_tests.SIGNALS
 SECRET = "slack-mcp-secret-cmd"
+SESSION_ROW = {"id": "sig_20260101_0901", "source": "session:owner", "links": ["https://example.com/detector"],
+               "pain": "NEW (no GitHub issue): the owner stopped the agent mid-turn (2 times in 2 sessions)",
+               "mentions": {"count": 2, "people": 1, "window_days": 14}, "layer": "real",
+               "testable": {"ok": True, "task": "Replaying the pained turns 3 times, stops stays <= 0."}, "dedup_of": None}
 
 
 class Req(dict):
@@ -50,6 +54,8 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr(routes, "github_rows", lambda: (seen.append("github"), gate.wait(10), (github, ""))[2])
     monkeypatch.setattr(settings, "read", lambda: {**settings.DEFAULTS, "command": SECRET})  # as the vault answers
     monkeypatch.setattr(routes.adapters.slack, "collect", lambda conf: seen.append(conf["command"]) or slack)
+    monkeypatch.setattr(routes.adapters.sessions, "collect", lambda: seen.append("sessions") or [SESSION_ROW])
+    monkeypatch.setattr(round_job, "make_prior", lambda: lambda rows, signals: seen.append("prior") or {})
     monkeypatch.setattr(round_job, "make_agent", lambda data: crew)
     monkeypatch.setattr(round_job, "make_saver", lambda data: lambda slug, title, page: slug)
     return {"data": tmp_path, "gate": gate, "seen": seen, "crew": crew}
@@ -69,12 +75,13 @@ def test_round_runs_with_the_apps_own_collectors(env):
     assert status == 202 and body["round"]["running"] is True and body["round"]["round"] == 1
     done = run()[1]
     assert done["running"] is False and done["error"] == "" and done["counts"]["proposals"] >= 3
-    assert env["seen"] == ["github", SECRET]  # Slack read with the vault's command, in-process
+    assert env["seen"] == ["github", SECRET, "sessions", "prior"]  # Slack read with the vault's command, in-process
     names = [n for n, _ in env["crew"].calls]
     assert "rsi-session-scanner" in names and "rsi-trend-scout" in names
     rows = [json.loads(x) for x in (env["data"] / "signals.jsonl").read_text().splitlines()]
     assert {r["source"].split(":")[0] for r in rows} >= {"github", "slack", "session", "trend"}
-    assert done["notes"] == [f"exams: not dry-run ({round_job.EXAM_ENV} unset)"]
+    assert "session:owner" in {r["source"] for r in rows}  # the deterministic collector, not only the scanner
+    assert done["notes"] == [f"exams: not dry-run ({round_job.EXAM_ENV} unset, no KiroCrew clone in the schedule)"]
     assert round_job.next_round() == 2
 
 
@@ -99,6 +106,22 @@ def test_round_is_single_flight(env):
 def test_refused_runs_start_nothing(env, req, status):
     assert text(asyncio.run(routes._round_run(req, None)))[0] == status
     assert round_job.STATE["started_at"] is None and env["seen"] == []
+
+
+def test_exams_dry_run_in_the_schedule_clone(env, monkeypatch, tmp_path):
+    from backend import schedule
+
+    monkeypatch.setattr(schedule, "read", lambda: {**schedule.DEFAULTS, "kirocrew_dir": str(tmp_path / "kc")})
+    checked = []
+    monkeypatch.setattr(round_job.crew(), "validate_checker", lambda wd: checked.append(wd) or (lambda row: (True, "")))
+    done = run(routes._round_run(Req(), None))[1]
+    assert done["error"] == "" and done["notes"] == [] and checked == [tmp_path / "kc"]
+
+
+def test_session_read_failure_is_a_note(env, monkeypatch):
+    monkeypatch.setattr(routes.adapters.sessions, "collect", lambda: (_ for _ in ()).throw(OSError("x")))
+    done = run(routes._round_run(Req(), None))[1]
+    assert done["error"] == "" and "sessions: OSError" in done["notes"]
 
 
 def test_failed_round_reports_and_frees_the_slot(env):
