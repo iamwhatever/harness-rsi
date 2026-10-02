@@ -2,7 +2,8 @@
 
 The hourly app cron posts ``/schedule/tick``; :func:`tick` starts what is on and due. Switches
 live in the vault (only the owner-only ``POST /schedule`` writes them); runs in ``schedule-runs.jsonl``.
-Out goes one note per round, one critical note per regression; no Slack post, PR or merge.
+Out goes one note per round, one critical note per regression, one note when regression exams could
+not run; no Slack post, PR or merge.
 """
 
 import asyncio
@@ -114,11 +115,14 @@ async def _regress(clock, started, conf, regress, notify):
         summary, error = await asyncio.to_thread(regress, conf["kirocrew_dir"])
     finally:
         REGRESS["running"] = False
-    found = (summary or {}).get("regressions") or []
-    record("regress", started, clock(), sha=(summary or {}).get("sha"), regressions=len(found), error=error)
+    found, unrun = ((summary or {}).get(k) or [] for k in ("regressions", "errors"))
+    record("regress", started, clock(), sha=(summary or {}).get("sha"), regressions=len(found), errors=len(unrun), error=error)
     if found:
         names = ", ".join(r.get("exam_id") or f"metrics {r.get('a')}/{r.get('b')}" for r in found)
         notify("regressions", "Harness RSI: regression after merge", f"KiroCrew {summary['sha']}: {names}")
+    if unrun:  # an exam this host cannot run (e.g. no Playwright in the gateway's Python) is not a pass
+        notify("rounds", f"Harness RSI: {len(unrun)} regression exam(s) could not run",
+               f"KiroCrew {summary['sha']}: {', '.join(unrun)}. Not a regression: this host cannot run them (see Regress on the board).")
 
 
 def tick(clock, conf, busy, start_round, regress, notify):

@@ -65,6 +65,26 @@ def test_cannot_run_without_playwright_or_spa(tmp_path, monkeypatch):
     assert dom.run(CHECK, {"workdir": tmp_path}) == (None, "playwright not installed (pip install playwright)")
 
 
+def test_a_driver_that_cannot_start_is_an_error_not_a_crash(tmp_path, monkeypatch):
+    """A Playwright whose bundled node cannot start (e.g. too old a libc) raises on enter."""
+    import types
+
+    class Dead:
+        def __enter__(self):
+            raise Exception("Connection.init: Connection closed while reading from the driver")
+
+        def __exit__(self, *exc):
+            return False
+
+    (tmp_path / "dist").mkdir()
+    (tmp_path / "dist" / "index.html").write_text("<p>x</p>")
+    fake = types.ModuleType("playwright.sync_api")
+    fake.Error, fake.sync_playwright = Exception, Dead
+    monkeypatch.setitem(sys.modules, "playwright.sync_api", fake)
+    assert dom.run(CHECK, {"workdir": tmp_path}) == (
+        None, "playwright driver cannot start: Connection.init: Connection closed while reading from the driver")
+
+
 def test_validate_refuses_what_cannot_run(tmp_path, capsys):
     (tmp_path / "e.json").write_text(json.dumps(exam()))
     assert validate.main([str(tmp_path / "e.json"), "--workdir", str(tmp_path)]) == 1

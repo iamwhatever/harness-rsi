@@ -185,7 +185,7 @@ def regress_runs():
     for path in (store.data_dir() / "regress").glob("*.json"):
         try:
             r = json.loads(path.read_text(encoding="utf-8"))
-            runs.append({k: r[k] for k in ("sha", "at", "baseline", "counts", "regressions")})
+            runs.append({**{k: r[k] for k in ("sha", "at", "baseline", "counts", "regressions")}, "errors": r.get("errors", [])})
         except (OSError, ValueError, KeyError, TypeError):
             continue
     return sorted(runs, key=lambda r: r["at"], reverse=True)

@@ -92,4 +92,14 @@ def test_regression_sends_one_critical_note_and_nothing_else(env, monkeypatch):
     (note,) = notes
     assert channels == {"harness-rsi.regressions": "critical"} and note.channel == "harness-rsi.regressions"
     assert note.url == "/apps/harness-rsi" and note.body == "KiroCrew f00dfeed1234: ex_chip, ex_undo"
-    assert [(r["kind"], r["sha"], r["regressions"]) for r in schedule.runs()] == [("regress", "f00dfeed1234", 2)]
+    assert [(r["kind"], r["sha"], r["regressions"], r["errors"]) for r in schedule.runs()] == [("regress", "f00dfeed1234", 2, 0)]
+
+
+def test_exams_that_could_not_run_send_one_plain_note(env):
+    summary = {"sha": "f00dfeed1234", "regressions": [], "errors": ["exam_chip"]}
+    env["fns"][1] = lambda kc: (summary, "")
+    assert tick(env, MON, {**ON, "round_enabled": False})["regress"] == "started"
+    ((channel, title, body),) = env["notes"]
+    assert channel == "rounds" and title == "Harness RSI: 1 regression exam(s) could not run"
+    assert "exam_chip" in body and "Not a regression" in body
+    assert [(r["regressions"], r["errors"]) for r in schedule.runs(kind="regress")] == [(0, 1)]
