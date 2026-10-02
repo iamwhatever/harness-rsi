@@ -85,12 +85,14 @@ async def _job(rnd, sources):
         STATE.update(error=str(exc) if is_round else type(exc).__name__)  # other text may quote a path
     finally:
         STATE.update(running=False, finished_at=time.time(), task=None)
+    return STATE["counts"] or {}, STATE["error"]
 
 
 def start(rnd, sources):
-    """Start a round unless one runs; call with no ``await`` between the check and this."""
+    """Start a round unless one runs (None); the task ends with ``(counts, error)``. Call with no
+    ``await`` between the check and this."""
     if STATE["running"]:
-        return False
+        return None
     STATE.update(running=True, round=rnd, started_at=time.time(), finished_at=None, counts=None, notes=[], error="")
     STATE["task"] = asyncio.get_running_loop().create_task(_job(rnd, sources))
-    return True
+    return STATE["task"]
