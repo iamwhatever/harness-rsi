@@ -113,6 +113,9 @@ def test_an_unchanged_pr_is_not_rescored_and_merge_promotes_and_regresses(env, m
     assert [(g["sha"], g["exams"], g["regressions"]) for g in row["regress"]] == [(sha, {EXAM["id"]: "pass"}, 0)]
     assert json.loads(next((env.data / "exams").rglob(f"{EXAM['id']}.json")).read_text())["visibility"] == "regression"
     assert (env.data / "regress" / f"{sha}.json").is_file()
+    older = json.loads((env.data / "regress" / f"{sha}.json").read_text())
+    older.update(sha="e" * 40, at="2000-01-01T00:00:00+00:00")
+    (env.data / "regress" / ("e" * 40 + ".json")).write_text(json.dumps(older))  # a run from before the merge
     later = json.loads((env.data / "regress" / f"{sha}.json").read_text())
     later.update(sha="f" * 40, at="2999-01-01T00:00:00+00:00", exams={EXAM["id"]: False},
                  regressions=[{"kind": "exam", "exam_id": EXAM["id"]}])
@@ -120,6 +123,8 @@ def test_an_unchanged_pr_is_not_rescored_and_merge_promotes_and_regresses(env, m
     env.tick()
     got = ledger.get("prop_bg_tasks", "kirodotdev/KiroCrew#7")["regress"]
     assert [(g["sha"][:1], g["exams"][EXAM["id"]], g["regressions"]) for g in got] == [(sha[:1], "pass", 0), ("f", "fail", 1)]
+    env.tick()  # a second pass adds nothing and never pulls in the older run
+    assert ledger.get("prop_bg_tasks", "kirodotdev/KiroCrew#7")["regress"] == got
 
 
 def test_backfill_cli_scores_one_pr_with_or_without_a_card_and_stops_on_the_rate_floor(env):

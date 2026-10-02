@@ -79,12 +79,12 @@ def metrics_for(pr):
 
 
 def regress_rows(row, ids):
-    """Stored post-merge regress runs at or after the merge, as ledger entries for this card's exams."""
-    seen, out = {r["sha"] for r in row["regress"]}, list(row["regress"])
-    runs = [json.loads(p.read_text(encoding="utf-8")) for p in (store.data_dir() / "regress").glob("*.json")]
-    for run in sorted(runs, key=lambda r: r["at"]):
-        if run["sha"] in seen or (run["sha"] != row["merged_sha"] and not out):
-            continue  # the first entry is the merge commit's own run
+    """The merge commit's regress run and every stored run after it, as entries for this card's exams."""
+    runs = sorted((json.loads(p.read_text(encoding="utf-8")) for p in (store.data_dir() / "regress").glob("*.json")),
+                  key=lambda r: r["at"])
+    start = next((r["at"] for r in runs if r["sha"] == row["merged_sha"]), None)
+    out = []
+    for run in (r for r in runs if start and r["at"] >= start):
         errs = set(run.get("errors", []))
         exams = {i: "error" if i in errs else "pass" if run["exams"][i] else "fail" for i in ids if i in run["exams"] or i in errs}
         bad = sum(1 for r in run.get("regressions", []) if r.get("exam_id") in ids)
