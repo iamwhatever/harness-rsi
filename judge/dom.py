@@ -2,8 +2,8 @@
 
 The SPA under `root` (relative to the workdir, default ".") is served on loopback with index.html
 fallback; nothing under /api is served, so an exam names every API answer it needs as a `route`
-setup step. Returns (ok, detail); ok is None when the check cannot run (no Playwright, no browser,
-no built SPA), so it is never mistaken for a failed assertion.
+setup step. Returns (ok, detail); ok is None when the check cannot run (no Playwright, a driver that
+cannot start, no browser, no built SPA), so it is never mistaken for a failed assertion.
 """
 
 import functools
@@ -58,8 +58,10 @@ def run(check, ctx):
     want = (lambda t: re.search(check["regex"], t) is not None) if "regex" in check else (lambda t: _norm(check["text"]) in t)
     srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), functools.partial(_Spa, directory=str(root)))
     threading.Thread(target=srv.serve_forever, daemon=True).start()
+    started = False
     try:
         with sync_playwright() as pw:
+            started = True
             try:
                 browser = pw.chromium.launch()
             except Error as exc:
@@ -95,6 +97,10 @@ def run(check, ctx):
                 return False, f"{check['selector']}: {str(exc).splitlines()[0]}"
             finally:
                 browser.close()
+    except Exception as exc:  # noqa: BLE001 - only a driver that never started; anything later is re-raised
+        if started:
+            raise
+        return None, f"playwright driver cannot start: {(str(exc).splitlines() or [type(exc).__name__])[0][:200]}"
     finally:
         srv.shutdown()
         srv.server_close()
