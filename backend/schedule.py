@@ -4,6 +4,7 @@ The hourly app cron posts ``/schedule/tick``; :func:`tick` starts what is on and
 live in the vault (only the owner-only ``POST /schedule`` writes them); runs in ``schedule-runs.jsonl``.
 Out goes one note per round, one critical note per regression, one note when regression exams could
 not run; no Slack post, PR or merge.
+``score_enabled`` lets the tick start the PR scoring job (``backend.autoscore``, via ``routes``).
 """
 
 import asyncio
@@ -17,7 +18,7 @@ from . import settings, store
 
 APP, VAULT_NAME, RUNS, BOARD_URL = "harness-rsi", "harness-rsi.schedule", "schedule-runs.jsonl", "/apps/harness-rsi"
 CHANNELS = {"rounds": "default", "regressions": "critical"}  # as app.json declares them
-DEFAULTS = {"round_enabled": False, "regress_enabled": False, "weekday": 0, "hour": 9, "kirocrew_dir": ""}
+DEFAULTS = {"round_enabled": False, "regress_enabled": False, "score_enabled": False, "weekday": 0, "hour": 9, "kirocrew_dir": ""}
 REGRESS = {"running": False}
 
 

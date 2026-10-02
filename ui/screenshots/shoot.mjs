@@ -30,14 +30,16 @@ fs.writeFileSync(path.join(tmp, 'index.html'),
 fs.writeFileSync(path.join(tmp, 'main.jsx'), `import { createRoot } from 'react-dom/client'
 import { initI18n } from '@host/i18n/all'
 import { HarnessRsi } from '${path.join(repo, 'ui/index.mjs')}'
-import { loadFixtures } from '${path.join(repo, 'ui/fake-data.mjs')}'
+import { loadFixtures, outcomes } from '${path.join(repo, 'ui/fake-data.mjs')}'
 import './harness.css'
 initI18n('en')
 document.documentElement.setAttribute('data-theme', 'dark')
-const load = async () => ({ ...(await loadFixtures()), images: { prop_bg_tasks: { before: '${before}' } } })
+const real = ${process.env.RSI_REAL ? fs.readFileSync(process.env.RSI_REAL, 'utf8') : 'null'}
+const load = async () => ({ ...(await loadFixtures()), images: { prop_bg_tasks: { before: '${before}' } }, ...(real ? { proposals: real.proposals, images: {} } : {}) })
+const onOutcomes = async () => ({ outcomes: real ? real.outcomes : outcomes, score: null })
 const onRefresh = async () => ({ total: 10, added: 0, errors: [] })
 const onStatus = async () => ({ running: false, started_at: null, finished_at: null, rows: null, error: '' })
-createRoot(document.getElementById('root')).render(<div className="flex flex-col h-screen bg-bg text-text"><HarnessRsi load={load} onRefresh={onRefresh} onStatus={onStatus} /></div>)
+createRoot(document.getElementById('root')).render(<div className="flex flex-col h-screen bg-bg text-text"><HarnessRsi load={load} onRefresh={onRefresh} onStatus={onStatus} onOutcomes={onOutcomes} /></div>)
 `)
 const alias = (name, to) => [{ find: new RegExp(`^${name}$`), replacement: to }, { find: new RegExp(`^${name}/(.*)$`), replacement: `${to}/$1` }]
 const server = await createServer({
@@ -61,7 +63,7 @@ try {
     await page.setViewportSize({ width: 1440, height: 900 })
     const h = await page.evaluate(() => Math.max(...[...document.querySelectorAll('#root *')].map((e) => e.scrollHeight)))
     await page.setViewportSize({ width: 1440, height: Math.max(900, h) })
-    await page.screenshot({ path: path.join(here, `${name}.png`) })
+    await page.screenshot({ path: path.join(process.env.RSI_OUT || here, `${name}.png`) })
   }
   await page.goto('http://127.0.0.1:5291/index.html')
   const cards = page.getByTestId('proposal-card')

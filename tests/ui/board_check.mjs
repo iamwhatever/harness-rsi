@@ -100,7 +100,7 @@ const edits = []
 const sform = expand(ui.ScheduleForm({ conf: sched.schedule, note: '', onSave: () => edits.push('save'), onChange: (c) => edits.push(c) }))
 const named = (n) => find(sform, (x) => x.props.name === n)[0]
 assert.deepEqual(find(sform, (x) => x.type === 'input' && x.props.type === 'checkbox').map((x) => [x.props.name, x.props.checked]),
-  [['round_enabled', false], ['regress_enabled', false]])
+  [['round_enabled', false], ['regress_enabled', false], ['score_enabled', undefined]])
 assert.deepEqual(find([named('weekday')], (x) => x.type === 'option').map(text), ui.DAYS)
 assert.equal(named('weekday').props.value, 0)
 named('round_enabled').props.onChange({ target: { type: 'checkbox', checked: true } })
@@ -153,4 +153,35 @@ const primary = order.filter((s) => !s.dedup_of)
 assert.deepEqual(order.slice(0, primary.length), primary)
 const people = primary.map((s) => s.mentions.people)
 assert.deepEqual(people, [...people].sort((a, b) => b - a))
+// Outcomes: the source reads, links and scores; a card shows each linked PR's judge line and regress line.
+const outcomes = JSON.parse(fs.readFileSync('fixtures/outcomes.json', 'utf8'))
+const osent = []
+const oapi = { get: async (p) => { assert.equal(p, '/api/apps/harness-rsi/outcomes'); return { outcomes, score: null } },
+  post: async (p, b) => { osent.push([p, b]); return { ok: true } } }
+assert.deepEqual(await ui.backendSource(oapi).outcomes(), { outcomes, score: null })
+await ui.backendSource(oapi).link('prop_bg_tasks', 15792)
+await ui.backendSource(oapi).score()
+assert.deepEqual(osent, [['/api/apps/harness-rsi/outcomes/link', { proposal_id: 'prop_bg_tasks', pr: 15792 }],
+  ['/api/apps/harness-rsi/score/run', {}]])
+assert.equal(ui.prUrl('kirodotdev/KiroCrew#15792'), 'https://github.com/kirodotdev/KiroCrew/pull/15792')
+assert.equal(ui.scoreText(outcomes[0]), 'Judge: base fail 0/1 → head pass 1/1')
+assert.equal(ui.scoreText(outcomes[1]), 'Not scored yet')
+assert.equal(ui.scoreText(outcomes[2]), 'Not scored: no card; no exam')
+assert.equal(ui.regressLine(outcomes[0]), 'Regress @ 3333333: 1/1 pass')
+assert.equal(ui.regressLine({ ...outcomes[0], regress: [{ ...outcomes[0].regress[0], exams: { a: 'fail' }, regressions: 1 }] }),
+  'Regress @ 3333333: 0/1 pass · 1 regression(s)')
+assert.equal(ui.regressLine(outcomes[1]), '')
+const linked = []
+const scored = expand(ui.Board({ proposals, outcomes, onDecide() {}, onLink: (id, n) => linked.push([id, n]) }))
+const bg = find(scored, (n) => n.props['data-id'] === 'prop_bg_tasks')[0]
+assert.equal(text(find([bg], (n) => n.props['data-testid'] === 'score')[0]), 'Judge: base fail 0/1 → head pass 1/1')
+assert.equal(find([bg], (n) => n.type === 'a' && n.props.href.includes('/pull/'))[0].props.href, 'https://github.com/example-org/example-repo/pull/101')
+const linkForm = find([bg], (n) => n.type === 'form')[0]
+linkForm.props.onSubmit({ preventDefault() {}, target: { elements: { pr: { value: '15792' } } } })
+linkForm.props.onSubmit({ preventDefault() {}, target: { elements: { pr: { value: '' } } } })  // blank: nothing linked
+assert.deepEqual(linked, [['prop_bg_tasks', 15792]])
+assert.ok(text(find(scored, (n) => n.props['data-id'] === 'prop_plain_errors')[0]).includes('No PR linked'))
+assert.equal(ui.scoreJobText(null), '')
+assert.match(ui.scoreJobText({ running: true, started_at: 1 }), /^Scoring PRs since /)
+assert.match(ui.scoreJobText({ running: false, started_at: 1, finished_at: 2, updated: [{}], error: '' }), /: 1 PR\(s\) changed$/)
 console.log('board ok')
