@@ -23,6 +23,8 @@ export function backendSource(api) {
     refresh: async () => { const r = await api.post(`${BASE}/refresh`, {}); return { ...r, errors: r.errors || [] } },
     settings: async () => (await api.get(`${BASE}/settings`)).settings,
     saveSettings: async (form) => (await api.post(`${BASE}/settings`, parseSettings(form))).settings,
+    schedule: () => api.get(`${BASE}/schedule`),
+    saveSchedule: async (conf) => (await api.post(`${BASE}/schedule`, conf)).schedule,
   }
 }
 
@@ -51,6 +53,43 @@ export function SettingsForm({ form, onChange, onSave, note }) {
       h('input', { name: k, value: form[k] ?? '', style: input, onChange: (e) => onChange({ ...form, [k]: e.target.value }) }))),
     h('div', { style: row({ alignItems: 'center' }) }, h(Btn, { type: 'button', primary: true, onClick: onSave }, 'Save'),
       h('span', { style: muted, 'aria-live': 'polite' }, note)))
+}
+
+export const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+/** The owner's schedule (backend.schedule): both jobs off until checked here and saved. */
+export function ScheduleForm({ conf, onChange, onSave, note }) {
+  const set = (k) => (e) => onChange({ ...conf, [k]: e.target.type === 'checkbox' ? e.target.checked : e.target.value })
+  const box = (k, text) => h('label', { style: { display: 'flex', gap: 8, marginTop: 10 } },
+    h('input', { type: 'checkbox', name: k, checked: conf[k], onChange: set(k) }), text)
+  const field = { display: 'block', marginTop: 10, ...muted }
+  return h(Card, { 'data-testid': 'schedule' },
+    h('div', { style: label }, 'Schedule'),
+    h('div', { style: muted }, 'Off until you check a box and save. Each run ends in one notification; nothing posts to Slack, opens a PR or merges.'),
+    box('round_enabled', 'Run a design-crew round once a week'),
+    h('div', { style: row({ marginTop: 6 }) },
+      h('label', { style: field }, 'Day ', h('select', { name: 'weekday', value: conf.weekday,
+        onChange: (e) => onChange({ ...conf, weekday: Number(e.target.value) }) }, DAYS.map((d, i) => h('option', { key: d, value: i }, d)))),
+      h('label', { style: field }, 'Hour (0-23, local) ', h('input', { name: 'hour', type: 'number', min: 0, max: 23, value: conf.hour,
+        onChange: (e) => onChange({ ...conf, hour: Number(e.target.value) }) }))),
+    box('regress_enabled', 'Check the regression exams once a day after new merges'),
+    h('label', { style: field }, 'KiroCrew clone for the regression check (absolute path)',
+      h('input', { name: 'kirocrew_dir', value: conf.kirocrew_dir, onChange: set('kirocrew_dir'), style: { width: '100%' } })),
+    h('div', { style: row({ alignItems: 'center' }) }, h(Btn, { type: 'button', primary: true, onClick: onSave }, 'Save schedule'),
+      h('span', { style: muted, 'aria-live': 'polite' }, note)))
+}
+const at = (s) => (s ? new Date(s).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }) : '')
+/** One line of result for a run record. */
+export const runResult = (r) => (r.error ? `Failed: ${r.error}` : r.kind === 'round' ? `${r.cards} cards from ${r.signals} signals`
+  : `${r.regressions ? `${r.regressions} regression(s)` : 'No regressions'} at ${String(r.sha || '').slice(0, 7)}`)
+/** The last scheduled runs, newest first. */
+export function Runs({ runs }) {
+  const cell = { padding: '6px 10px', borderBottom: '1px solid var(--border)', textAlign: 'left', fontSize: 13 }
+  return h(Card, { 'data-testid': 'schedule-runs' }, h('table', { style: { width: '100%', borderCollapse: 'collapse' } },
+    h('caption', { style: { ...label, textAlign: 'left' } }, 'Last scheduled runs'),
+    h('thead', null, h('tr', null, ['Job', 'Started', 'Ended', 'Result'].map((c) => h('th', { key: c, scope: 'col', style: { ...cell, ...muted } }, c)))),
+    h('tbody', null, runs.length ? runs.map((r) => h('tr', { key: r.kind + r.start, 'data-testid': 'run-row' },
+      [r.kind === 'round' ? 'Weekly round' : 'Daily regression', at(r.start), at(r.end), runResult(r)].map((c, i) => h('td', { key: i, style: cell }, c))))
+      : h('tr', null, h('td', { colSpan: 4, style: { ...cell, ...muted } }, 'No scheduled runs yet')))))
 }
 
 export const DECISIONS = [['do', '做', 'Doing'], ['skip', '不做', 'Not doing'], ['later', '以后再说', 'Later']]
@@ -152,7 +191,12 @@ export function RunRound({ armed, running, onArm, onConfirm, onCancel }) {
 }
 /** The page body. `load` is the data source; `onDecide` saves a choice; `onRefresh` pulls
  *  signals; `onStatus` reads the GitHub job, polled while it runs. */
-export function HarnessRsi({ load, onDecide, onRefresh, onStatus, onSettings, onSaveSettings, onRegress, onRoundStatus, onRunRound }) {
+export function HarnessRsi({ load, onDecide, onRefresh, onStatus, onSettings, onSaveSettings, onRegress, onRoundStatus, onRunRound,
+  onSchedule, onSaveSchedule }) {
+  const [[sched, schedNote], setSched] = useState([null, ''])
+  useEffect(() => { onSchedule?.().then((v) => setSched([v, '']), () => {}) }, [onSchedule])
+  const saveSched = () => onSaveSchedule(sched.schedule).then(() => onSchedule())
+    .then((v) => setSched([v, 'Saved']), (e) => setSched([sched, `Not saved: ${why(e)}`]))
   const [regress, setRegress] = useState(undefined)
   useEffect(() => { onRegress?.().then(setRegress, () => {}) }, [onRegress])
   const [[data, error], setState] = useState([null, ''])
@@ -195,9 +239,13 @@ export function HarnessRsi({ load, onDecide, onRefresh, onStatus, onSettings, on
     background: on ? 'var(--bg-hover)' : 'transparent', color: on ? 'var(--text-strong)' : MUTED })
   const body = error ? h('div', { role: 'alert', style: { color: 'var(--danger)' } }, `Could not load data: ${error}`)
     : !data ? h('div', { style: muted }, 'Loading…')
-      : tab === 'settings' ? (form ? h(SettingsForm, { form, note: formNote, onSave: save,
-        onChange: (f) => setForm([f, ''])}) : h('div', { style: muted }, formNote || 'Loading…'))
-      : tab === 'board' ? h(Board, { proposals: data.proposals, images: data.images, onDecide: decide })
+      : tab === 'settings' ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: 12 } },
+        form ? h(SettingsForm, { form, note: formNote, onSave: save, onChange: (f) => setForm([f, '']) })
+          : h('div', { style: muted }, formNote || 'Loading…'),
+        sched ? h(ScheduleForm, { conf: sched.schedule, note: schedNote, onSave: saveSched,
+          onChange: (c) => setSched([{ ...sched, schedule: c }, '']) }) : null)
+      : tab === 'board' ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: 12 } },
+        sched ? h(Runs, { runs: sched.runs }) : null, h(Board, { proposals: data.proposals, images: data.images, onDecide: decide }))
         : h(Signals, { signals: data.signals })
   return h('div', { style: { flex: 1, overflowY: 'auto' } },
     h(PageHeader, { title: 'Harness RSI', subtitle: 'Pick what to build next. Nothing runs until you decide.' }),
@@ -225,5 +273,5 @@ export default function HarnessRsiPage() {
   const src = useMemo(() => backendSource(api), [api])
   return h(HarnessRsi, { load: src.load, onDecide: src.decide, onRefresh: src.refresh, onStatus: src.status,
     onSettings: src.settings, onSaveSettings: src.saveSettings, onRegress: src.regress,
-    onRoundStatus: src.round, onRunRound: src.runRound })
+    onRoundStatus: src.round, onRunRound: src.runRound, onSchedule: src.schedule, onSaveSchedule: src.saveSchedule })
 }
