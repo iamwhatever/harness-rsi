@@ -4,7 +4,7 @@
   "description": "One outcome-ledger row: a card, its decision, one product PR, the judge's runs on base and head, and post-merge regress results. A change appends the whole row; the newest per (card_id, pr) is current.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["card_id", "decision", "pr", "link", "state", "base_sha", "head_sha", "merged_sha", "exam_ids", "score", "promoted", "regress", "note", "at"],
+  "required": ["card_id", "decision", "pr", "link", "state", "base_sha", "head_sha", "merged_sha", "exam_ids", "score", "promoted", "regress", "prompt_versions", "note", "at"],
   "$defs": {
     "sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
     "sha_or_null": {"anyOf": [{"$ref": "#/$defs/sha"}, {"type": "null"}]},
@@ -30,6 +30,8 @@
     "regress": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["sha", "at", "exams", "regressions"],
       "properties": {"sha": {"$ref": "#/$defs/sha"}, "at": {"type": "string", "format": "date-time"},
         "exams": {"type": "object", "additionalProperties": {"enum": ["pass", "fail", "error"]}}, "regressions": {"type": "integer", "minimum": 0}}}},
+    "prompt_versions": {"type": ["object", "null"], "additionalProperties": {"type": "string", "pattern": "^v[0-9a-f]{10}$"},
+      "description": "agent -> prompt version id of the round that wrote the card; null when that round recorded none"},
     "note": {"type": "string", "maxLength": 200, "description": "\"no exam\", \"no card\", or why a score is missing"},
     "at": {"type": "string", "format": "date-time"}
   }

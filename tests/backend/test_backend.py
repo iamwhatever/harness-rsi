@@ -218,5 +218,5 @@ def test_disabled_app_registers_nothing(tmp_path, monkeypatch):
                    ("GET", "/refresh/status"), ("GET", "/settings"), ("POST", "/settings"), ("GET", "/regress"),
                    ("POST", "/round/run"), ("GET", "/round/status"), ("GET", "/schedule"), ("POST", "/schedule"),
                    ("POST", "/schedule/tick"), ("GET", "/outcomes"), ("POST", "/outcomes/link"),
-                   ("POST", "/score/run")]
+                   ("POST", "/score/run"), ("GET", "/prompt-changes"), ("POST", "/prompt-changes/decide")]
     assert not (tmp_path / "d").exists()

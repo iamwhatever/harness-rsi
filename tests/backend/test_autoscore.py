@@ -148,3 +148,16 @@ def test_ledger_newest_row_wins_and_a_bad_row_is_refused(env):
         ledger.put({**ledger.blank("o/r#2"), "body": "x"})
     (env.data / ledger.FILE).open("a").write("not json\n{}\n")
     assert len(ledger.rows()) == 1
+
+
+def test_a_scored_row_names_the_prompt_versions_of_the_round_that_wrote_its_card(env):
+    used = {"rsi-question-setter": "v0123456789", "rsi-reviewer-risk": "vabcdefabcd"}
+    (env.data / "prompt_versions.json").write_text(json.dumps(used), encoding="utf-8")
+    env.origin.pr(7, "prop_bg_tasks")
+    env.tick()
+    row = ledger.get("prop_bg_tasks", "kirodotdev/KiroCrew#7")
+    assert row["prompt_versions"] == used and store.valid("outcome", row)
+    assert autoscore.round_versions("prop_nope") is None
+    old = {k: v for k, v in ledger.blank("o/r#3", "prop_bg_tasks").items() if k != "prompt_versions"}
+    (env.data / ledger.FILE).open("a").write(json.dumps(old) + "\n")  # written before prompt versions
+    assert ledger.get("prop_bg_tasks", "o/r#3")["prompt_versions"] is None

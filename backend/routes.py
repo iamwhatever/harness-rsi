@@ -11,6 +11,8 @@ reports it. ``/schedule`` and ``/schedule/tick``: the owner's opt-in weekly roun
 regress (``backend.schedule``), off by default. ``GET /outcomes`` reads the outcome ledger
 and the scoring job; ``POST /outcomes/link`` links a card to a KiroCrew PR; ``POST /score/run``
 starts ``python -m backend.autoscore`` (single-flight; the tick does when scoring is on).
+``GET /prompt-changes`` lists the proposer's prompt-change cards; ``POST /prompt-changes/decide``
+records the owner's choice, and 做 applies the change (``backend.prompt_changes``).
 No startup hook, no timer in the gateway.
 """
 
@@ -31,7 +33,7 @@ except ImportError:  # tests and the CLI import ``backend`` as a top-level packa
     import adapters.sessions
     import adapters.slack
 
-from . import ledger, round_job, schedule, settings, store
+from . import ledger, prompt_changes, round_job, schedule, settings, store
 
 APP_NAME = "harness-rsi"
 MAX_BODY = 2 * 1024 * 1024
@@ -306,6 +308,25 @@ async def _schedule_tick(request, ctx):
     return web.json_response({"ok": True, **out})
 
 
+async def _prompt_changes(request, ctx):
+    return web.json_response({"ok": True, "changes": await asyncio.to_thread(prompt_changes.read)})
+
+
+async def _prompt_decide(request, ctx):
+    if not _owner(request):
+        return _err(403, "owner_only", "only the dashboard owner can change a crew prompt")
+    body = await _body(request) or {}
+    if body.get("decision") not in store.DECISIONS:
+        return _err(400, "bad_decision", "decision must be do, skip or later")
+    try:
+        card = await asyncio.to_thread(prompt_changes.decide, body.get("id"), body["decision"])
+    except LookupError:
+        return _err(404, "unknown_change", "no such prompt change")
+    except ValueError as exc:
+        return _err(409, "not_applied", str(exc))
+    return web.json_response({"ok": True, "change": card})
+
+
 def register_routes(ctx):
     """Named by ``backend.hooks.routes``; the host calls it only for an enabled app."""
     from kiro_crew.apps.route_registry import AppRoute
@@ -327,4 +348,6 @@ def register_routes(ctx):
         AppRoute(method="GET", path="/outcomes", handler=_outcomes),
         AppRoute(method="POST", path="/outcomes/link", handler=_link),
         AppRoute(method="POST", path="/score/run", handler=_score_post),
+        AppRoute(method="GET", path="/prompt-changes", handler=_prompt_changes),
+        AppRoute(method="POST", path="/prompt-changes/decide", handler=_prompt_decide),
     ]

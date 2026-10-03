@@ -28,6 +28,8 @@ export function backendSource(api) {
     outcomes: () => api.get(`${BASE}/outcomes`),
     link: (id, pr) => api.post(`${BASE}/outcomes/link`, { proposal_id: id, pr }),
     score: () => api.post(`${BASE}/score/run`, {}),
+    promptChanges: async () => (await api.get(`${BASE}/prompt-changes`)).changes,
+    decidePrompt: async (id, decision) => (await api.post(`${BASE}/prompt-changes/decide`, { id, decision })).change,
   }
 }
 
@@ -177,6 +179,31 @@ export function ProposalCard({ proposal: p, before, onDecide, outcomes, onLink }
         p.decision ? `Decided: ${DECISIONS.find((d) => d[0] === p.decision)[2]}` : 'Not decided')))
 }
 
+const VERDICT = { better: 'ok', worse: 'err', same: 'muted' }
+/** One proposed crew-prompt change: its A/B numbers and diff. 做 applies it (a new prompt version). */
+export function PromptChangeCard({ change: c, onDecide }) {
+  const titleId = `pc-${c.id}`
+  const cell = { padding: '4px 10px', borderBottom: '1px solid var(--border)', textAlign: 'left', fontSize: 13 }
+  const num = (x) => (x == null ? '—' : String(x))
+  return h(Card, { role: 'region', 'aria-labelledby': titleId, 'data-testid': 'prompt-change-card', 'data-id': c.id },
+    h('div', { style: label }, 'Prompt change'),
+    h('h3', { id: titleId, style: { margin: 0, fontSize: 16, fontWeight: 600, color: 'var(--text-strong)' } }, `${c.agent}: ${c.summary}`),
+    h('div', { style: { ...muted, marginTop: 4 } }, `${c.from} → ${c.to}`),
+    c.ab ? h('table', { style: { marginTop: 12, borderCollapse: 'collapse' }, 'data-testid': 'prompt-ab' },
+      h('caption', { style: { ...label, textAlign: 'left' } }, `A/B on rounds ${c.ab.rounds.join(', ')}, ${c.ab.reps} runs each`),
+      h('thead', null, h('tr', null, ['Metric', 'A (now)', 'B (change)', 'Verdict'].map((t) => h('th', { key: t, scope: 'col', style: { ...cell, ...muted } }, t)))),
+      h('tbody', null, Object.entries(c.ab.metrics).map(([m, v]) => h('tr', { key: m },
+        h('td', { style: cell }, h('code', null, m)), h('td', { style: cell }, num(v.A)), h('td', { style: cell }, num(v.B)),
+        h('td', { style: cell }, h(Badge, { variant: VERDICT[v.verdict] || 'muted' }, v.verdict))))))
+      : h('div', { style: { ...muted, marginTop: 12 } }, 'No A/B run yet'),
+    h('details', { style: { marginTop: 12 } }, h('summary', { style: muted }, 'Show the diff'),
+      h('pre', { style: { fontSize: 12, whiteSpace: 'pre-wrap', overflowX: 'auto' } }, c.diff)),
+    h('div', { role: 'group', 'aria-label': `Decision for prompt change ${c.id}`, style: row({ gap: 8, alignItems: 'center' }) },
+      c.status === 'applied' ? h('span', { style: muted }, `Applied: ${c.agent} now runs ${c.to}`)
+        : DECISIONS.map(([value, text]) => h(Btn, { key: value, type: 'button', 'data-decision': value, primary: c.status === value,
+          'aria-pressed': c.status === value, onClick: () => onDecide(c.id, value) }, text))))
+}
+
 export function Board({ proposals, images = {}, onDecide, outcomes, onLink }) {
   if (!proposals.length) return h(EmptyState, { icon: null, title: 'No proposals yet' })
   return h('div', { style: { display: 'flex', flexDirection: 'column', gap: 12 } }, byHeat(proposals).map((p) =>
@@ -229,7 +256,12 @@ export function RunRound({ armed, running, onArm, onConfirm, onCancel }) {
 /** The page body. `load` is the data source; `onDecide` saves a choice; `onRefresh` pulls
  *  signals; `onStatus` reads the GitHub job, polled while it runs. */
 export function HarnessRsi({ load, onDecide, onRefresh, onStatus, onSettings, onSaveSettings, onRegress, onRoundStatus, onRunRound,
-  onSchedule, onSaveSchedule, onOutcomes, onLink, onScore }) {
+  onSchedule, onSaveSchedule, onOutcomes, onLink, onScore, onPromptChanges, onDecidePrompt }) {
+  const [changes, setChanges] = useState([])
+  const loadChanges = useCallback(() => onPromptChanges?.().then(setChanges, () => {}), [onPromptChanges])
+  useEffect(() => { loadChanges() }, [loadChanges])
+  const decidePrompt = (id, decision) => onDecidePrompt(id, decision)
+    .then(() => { setNote(decision === 'do' ? 'Prompt change applied' : 'Saved'); loadChanges() }, (e) => setNote(`Not applied: ${why(e)}`))
   const [out, setOut] = useState(null)
   const loadOut = useCallback(() => onOutcomes?.().then(setOut, () => {}), [onOutcomes])
   useEffect(() => { loadOut() }, [loadOut])
@@ -293,7 +325,8 @@ export function HarnessRsi({ load, onDecide, onRefresh, onStatus, onSettings, on
         sched ? h(ScheduleForm, { conf: sched.schedule, note: schedNote, onSave: saveSched,
           onChange: (c) => setSched([{ ...sched, schedule: c }, '']) }) : null)
       : tab === 'board' ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: 12 } },
-        sched ? h(Runs, { runs: sched.runs }) : null, h(Board, { proposals: data.proposals, images: data.images, onDecide: decide,
+        sched ? h(Runs, { runs: sched.runs }) : null,
+        changes.map((c) => h(PromptChangeCard, { key: c.id, change: c, onDecide: decidePrompt })), h(Board, { proposals: data.proposals, images: data.images, onDecide: decide,
           outcomes: out?.outcomes, onLink: onLink && linkPr }))
         : h(Signals, { signals: data.signals })
   return h('div', { style: { flex: 1, overflowY: 'auto' } },
@@ -325,5 +358,5 @@ export default function HarnessRsiPage() {
   return h(HarnessRsi, { load: src.load, onDecide: src.decide, onRefresh: src.refresh, onStatus: src.status,
     onSettings: src.settings, onSaveSettings: src.saveSettings, onRegress: src.regress,
     onRoundStatus: src.round, onRunRound: src.runRound, onSchedule: src.schedule, onSaveSchedule: src.saveSchedule,
-    onOutcomes: src.outcomes, onLink: src.link, onScore: src.score })
+    onOutcomes: src.outcomes, onLink: src.link, onScore: src.score, onPromptChanges: src.promptChanges, onDecidePrompt: src.decidePrompt })
 }

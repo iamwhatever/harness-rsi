@@ -184,4 +184,21 @@ assert.ok(text(find(scored, (n) => n.props['data-id'] === 'prop_plain_errors')[0
 assert.equal(ui.scoreJobText(null), '')
 assert.match(ui.scoreJobText({ running: true, started_at: 1 }), /^Scoring PRs since /)
 assert.match(ui.scoreJobText({ running: false, started_at: 1, finished_at: 2, updated: [{}], error: '' }), /: 1 PR\(s\) changed$/)
+// Prompt change: the card shows A vs B per metric and the diff; 做 sends the decision; an applied card has no buttons.
+const { promptChange: pc } = await import('./ui/fake-data.mjs')
+const papi = { get: async (p) => { assert.equal(p, '/api/apps/harness-rsi/prompt-changes'); return { changes: [pc] } },
+  post: async (p, b) => { assert.equal(p, '/api/apps/harness-rsi/prompt-changes/decide'); return { change: { ...pc, status: 'applied', b } } } }
+assert.deepEqual(await ui.backendSource(papi).promptChanges(), [pc])
+assert.deepEqual((await ui.backendSource(papi).decidePrompt(pc.id, 'do')).b, { id: pc.id, decision: 'do' })
+const picked = []
+const pcard = expand(ui.PromptChangeCard({ change: pc, onDecide: (id, d) => picked.push([id, d]) }))
+const ptext = text(pcard[0])
+for (const w of ['Prompt change', pc.summary, 'vaaaaaaaaaa → v0123456789', 'setter_hit_rate', '0.1', '0.3', 'better', '+7. Another new rule.']) {
+  assert.ok(ptext.includes(w), w)
+}
+find(pcard, (n) => n.type === 'button').forEach((b) => b.props.onClick())
+assert.deepEqual(picked, [[pc.id, 'do'], [pc.id, 'skip'], [pc.id, 'later']])
+const done = expand(ui.PromptChangeCard({ change: { ...pc, status: 'applied', ab: null }, onDecide() {} }))
+assert.equal(find(done, (n) => n.type === 'button').length, 0)
+assert.ok(text(done[0]).includes('Applied: rsi-question-setter now runs v0123456789') && text(done[0]).includes('No A/B run yet'))
 console.log('board ok')

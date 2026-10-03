@@ -1,7 +1,7 @@
 """The outcome ledger: ``$HARNESS_RSI_DATA/outcomes.jsonl``, one ``outcome`` schema row per line.
 
 A change appends the whole row; the newest row per ``(card_id, pr)`` is current, and a row that
-fails the schema is left out. Card -> decision -> PR -> merge sha -> judge score -> regress.
+fails the schema is left out. Card -> decision -> PR -> merge sha -> judge score -> regress, plus the crew prompt versions behind the card.
 """
 
 import datetime as dt
@@ -21,13 +21,14 @@ def now():
 def blank(pr, card_id=None, link="board"):
     return {"card_id": card_id, "decision": None, "pr": pr, "link": link, "state": "open", "base_sha": None, "head_sha": None,
             "merged_sha": None, "exam_ids": [], "score": {"base": None, "head": None, "metrics": None}, "promoted": [],
-            "regress": [], "note": "", "at": now()}
+            "regress": [], "prompt_versions": None, "note": "", "at": now()}
 
 
 def rows():
-    """Current rows, in the order they were first written."""
+    """Current rows, in the order they were first written; a row from before prompt versions reads as null."""
     latest = {}
-    for r in (r for r in store._jsonl(FILE) if store.valid("outcome", r)):
+    old = ({"prompt_versions": None, **r} if isinstance(r, dict) else r for r in store._jsonl(FILE))
+    for r in (r for r in old if store.valid("outcome", r)):
         latest[(r["card_id"], r["pr"])] = r
     return list(latest.values())
 
