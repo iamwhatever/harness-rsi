@@ -64,3 +64,19 @@ def test_committed_prompts_name_no_fixture_exam():
     fixtures = json.loads((ROOT / "fixtures" / "exams.json").read_text())
     for name, text in prompts.effective(None).items():
         assert prompts.leaks(text, fixtures) == [], name
+
+
+
+def test_the_setter_facts_show_a_regression_exam_and_never_a_hidden_one(tmp_path):
+    from test_setter_facts import SIG, checkout
+
+    bank, rows = tmp_path / "bank", []
+    (bank / "hidden").mkdir(parents=True)
+    for vis in ("hidden", "regression"):
+        cmd = ["python3", "-c", f"import sys; sys.exit(0)  # the {vis} probe command"]
+        rows.append({"id": f"exam_{vis}_probe", "visibility": vis, "task": f"A {vis} task, long enough to match.",
+                     "check": {"kind": "exit_code", "cmd": cmd, "expect": 0}})
+        (bank / "hidden" / f"{rows[-1]['id']}.json").write_text(json.dumps(rows[-1]))
+    text = load().setter_facts(checkout(tmp_path), bank)([SIG])
+    assert "the regression probe command" in text and prompts.leaks(text, rows) == []
+    assert prompts.leaks("see " + json.dumps(rows[0]["check"]), rows) == ["exam_hidden_probe"]  # a check is exam text too

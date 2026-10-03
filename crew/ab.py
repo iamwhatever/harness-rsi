@@ -123,7 +123,7 @@ def verdict(metric: str, a: list[float], b: list[float]) -> str:
     return "worse" if not core.paired(doc(a, b))[0]["ok"] else "better" if not core.paired(doc(b, a))[0]["ok"] else "same"
 
 
-def replay(data: Path, agent: str, texts: dict, call: Call, signals: list[dict], rnd: int, rep: int) -> dict:
+def replay(data: Path, agent: str, texts: dict, call: Call, signals: list[dict], rnd: int, rep: int, facts: str = "") -> dict:
     """One arm's saved (or new) reply for one round and repeat: the setter's turn, or the whole debate."""
     key = texts[agent] if agent == rr.SETTER else "\n".join(texts[r] for r in reduce.REVIEWERS)
     path = data / "ab" / "cache" / ("setter" if agent == rr.SETTER else "reviewers") / prompts.version(key) / f"r{rnd}-{rep}.json"
@@ -133,14 +133,14 @@ def replay(data: Path, agent: str, texts: dict, call: Call, signals: list[dict],
             reply, credits = call(name, texts[name], message)
             spent.append(credits)
             return reply
-        got = turn(rr.SETTER, rr.setter_message(signals, rnd)) if agent == rr.SETTER else rr.debate(turn, signals)
+        got = turn(rr.SETTER, rr.setter_message(signals, rnd, facts)) if agent == rr.SETTER else rr.debate(turn, signals)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps({"reply": got, "credits": None if None in spent else sum(spent), "turns": len(spent)}))
     return json.loads(path.read_text(encoding="utf-8"))
 
 
 def run(data: Path, agent: str, variant: str, call: Call, trees: Callable, rounds: list[int], reps: int,
-        merged_at: dict | None = None) -> dict:
+        merged_at: dict | None = None, facts: Callable | None = None) -> dict:
     if found := prompts.leaks(variant, prompts.bank(data)):
         raise ValueError(f"variant names {len(found)} exam(s); exams never go into prompts")
     texts = prompts.effective(data)
@@ -150,7 +150,7 @@ def run(data: Path, agent: str, variant: str, call: Call, trees: Callable, round
         signals = _jsonl(d / "signals.jsonl")
         exams = [json.loads(p.read_text(encoding="utf-8")) for p in sorted((d / "exams" / "hidden").glob("*.json"))]
         for arm, rep in ((a, r) for a in arms for r in range(reps)):
-            got = replay(data, agent, arms[arm], call, signals, rnd, rep)
+            got = replay(data, agent, arms[arm], call, signals, rnd, rep, facts(signals) if facts else "")
             hit, c = setter_sample(got["reply"], signals, rnd, fx, trees) if agent == rr.SETTER else (None, Counter())
             why[arm].update(c)
             vals = {"setter_hit_rate": hit} if agent == rr.SETTER else reviewer_sample(got["reply"], signals, exams, deck, merged_at or {})
@@ -206,12 +206,11 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--kirocrew", type=Path, required=True, help="KiroCrew clone: fix PR base/head trees come from it")
     ap.add_argument("--rounds", type=int, nargs="+", default=[3, 4, 5])
     ap.add_argument("--reps", type=int, default=3)
-    ap.add_argument("--trees", type=Path, help="where base/head worktrees are kept (default: DATA/ab/trees)")
     args = ap.parse_args(argv)
     data = Path(os.environ.get("HARNESS_RSI_DATA", Path.home() / ".kiro/crew/harness-rsi-data"))
     out = run(data, args.agent, args.variant.read_text(encoding="utf-8"), kiro_call(data / "ab" / ".run"),
-              tree_maker(args.kirocrew, args.trees or data / "ab" / "trees"), args.rounds, args.reps,
-              merged_dates(data) if args.agent != rr.SETTER else {})
+              tree_maker(args.kirocrew, data / "ab" / "trees"), args.rounds, args.reps,
+              merged_dates(data) if args.agent != rr.SETTER else {}, rr.setter_facts(args.kirocrew, data / "exams"))
     (data / "ab" / f"{args.agent}-{out['A']}-{out['B']}.json").write_text(json.dumps(out, indent=1) + "\n", encoding="utf-8")
     print(json.dumps({m: {k: v[k] for k in ("A", "B", "verdict")} for m, v in out["metrics"].items()}))
     return 0

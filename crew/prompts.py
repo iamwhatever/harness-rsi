@@ -1,8 +1,6 @@
-"""Crew prompt versions. A prompt's source is ``crew/agents/prompts/<agent>.md``; a change the owner applied
-lives in ``$HARNESS_RSI_DATA/prompts/<agent>.md`` and wins, and each apply appends to ``prompt_versions.jsonl``.
-A version id is ``v`` + the first 10 hex digits of the text's sha256. Hidden exams never reach a prompt:
-``leaks`` finds a bank exam's id or task in a text, and ``apply`` refuses such a text.
-"""
+"""Crew prompt versions (``v`` + 10 hex digits of the text's sha256). The owner's applied change lives in
+``$HARNESS_RSI_DATA/prompts/<agent>.md``, wins over ``crew/agents/prompts/``, and is logged to ``prompt_versions.jsonl``.
+Hidden exams never reach a prompt: ``leaks`` finds a hidden exam's id, task or check, and ``apply`` refuses it."""
 
 from __future__ import annotations
 
@@ -41,10 +39,11 @@ def bank(data: Path) -> list[dict]:
 
 
 def leaks(text: str, exams: list[dict]) -> list[str]:
-    """The exams whose id, or whose task sentence (any case or spacing), appears in ``text``."""
+    """The hidden exams whose id, task sentence or check (any case or spacing) appears in ``text``."""
     norm = lambda t: re.sub(r"\s+", " ", t).strip().lower()  # noqa: E731
     flat, words = norm(text), set(re.findall(r"exam_[a-z0-9_]+", text))
-    return sorted({x["id"] for x in exams if x["id"] in words or (len(norm(x.get("task", ""))) >= 24 and norm(x["task"]) in flat)})
+    said = lambda x: [norm(t) for t in (x.get("task", ""), json.dumps(x.get("check", ""))) if len(norm(t)) >= 24]  # noqa: E731
+    return sorted({x["id"] for x in exams if x.get("visibility", "hidden") == "hidden" and (x["id"] in words or any(t in flat for t in said(x)))})
 
 
 def apply(data: Path, agent: str, text: str, change_id: str) -> dict:

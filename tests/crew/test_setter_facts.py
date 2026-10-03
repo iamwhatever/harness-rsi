@@ -70,9 +70,10 @@ def test_a_signal_with_no_real_code_says_so(tmp_path):
     assert "(no close match: prefer writing no exam over guessing)" in text
 
 
-def test_examples_take_one_published_exam_per_kind(tmp_path):
-    for n, kind in enumerate(["exit_code", "exit_code", "dom_assert"]):
-        (tmp_path / f"exam_{n}.json").write_text(json.dumps({"id": f"exam_{n}", "check": {"kind": kind}}) + " " * n)
+def test_examples_take_one_regression_exam_per_kind_and_never_a_hidden_one(tmp_path):
+    for n, kind in enumerate(["exit_code", "exit_code", "dom_assert", "file_assert"]):
+        vis = "hidden" if kind == "file_assert" else "regression"
+        (tmp_path / f"exam_{n}.json").write_text(json.dumps({"id": f"exam_{n}", "visibility": vis, "check": {"kind": kind}}) + " " * n)
     assert [x["id"] for x in tf.examples(tmp_path)] == ["exam_0", "exam_2"]
 
 
