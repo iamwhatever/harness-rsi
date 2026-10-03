@@ -1,6 +1,7 @@
 // Render ui/screenshots/*.png from the FAKE fixtures with the host's real UI components
 // and theme; nothing talks to a gateway. Needs a KiroCrew website checkout:
 //   KIROCREW_WEBSITE=/path/to/KiroCrew/website node ui/screenshots/shoot.mjs
+// RSI_PROMPT_CHANGE=card.json swaps in one saved prompt-change card; its shot goes to card.json.png, out of git.
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -30,16 +31,17 @@ fs.writeFileSync(path.join(tmp, 'index.html'),
 fs.writeFileSync(path.join(tmp, 'main.jsx'), `import { createRoot } from 'react-dom/client'
 import { initI18n } from '@host/i18n/all'
 import { HarnessRsi } from '${path.join(repo, 'ui/index.mjs')}'
-import { loadFixtures, outcomes } from '${path.join(repo, 'ui/fake-data.mjs')}'
+import { loadFixtures, outcomes, promptChange } from '${path.join(repo, 'ui/fake-data.mjs')}'
 import './harness.css'
 initI18n('en')
 document.documentElement.setAttribute('data-theme', 'dark')
 const real = ${process.env.RSI_REAL ? fs.readFileSync(process.env.RSI_REAL, 'utf8') : 'null'}
 const load = async () => ({ ...(await loadFixtures()), images: { prop_bg_tasks: { before: '${before}' } }, ...(real ? { proposals: real.proposals, images: {} } : {}) })
 const onOutcomes = async () => ({ outcomes: real ? real.outcomes : outcomes, score: null })
+const onPromptChanges = async () => [${process.env.RSI_PROMPT_CHANGE ? fs.readFileSync(process.env.RSI_PROMPT_CHANGE, 'utf8') : 'promptChange'}]
 const onRefresh = async () => ({ total: 10, added: 0, errors: [] })
 const onStatus = async () => ({ running: false, started_at: null, finished_at: null, rows: null, error: '' })
-createRoot(document.getElementById('root')).render(<div className="flex flex-col h-screen bg-bg text-text"><HarnessRsi load={load} onRefresh={onRefresh} onStatus={onStatus} onOutcomes={onOutcomes} /></div>)
+createRoot(document.getElementById('root')).render(<div className="flex flex-col h-screen bg-bg text-text"><HarnessRsi load={load} onRefresh={onRefresh} onStatus={onStatus} onOutcomes={onOutcomes} onPromptChanges={onPromptChanges} /></div>)
 `)
 const alias = (name, to) => [{ find: new RegExp(`^${name}$`), replacement: to }, { find: new RegExp(`^${name}/(.*)$`), replacement: `${to}/$1` }]
 const server = await createServer({
@@ -75,6 +77,10 @@ try {
   if ((await doBtn.getAttribute('aria-pressed')) !== 'true') errors.push('Enter did not press 做')
   await page.mouse.move(0, 0)
   await shoot('board')
+  const pc = page.getByTestId('prompt-change-card')
+  await pc.locator('summary').click()
+  await pc.screenshot({ path: process.env.RSI_PROMPT_CHANGE ? `${process.env.RSI_PROMPT_CHANGE}.png` : path.join(here, 'prompt-change.png') })
+  await pc.locator('summary').click()
   await page.getByRole('tab', { name: 'Signals' }).click()
   await page.getByTestId('signal-row').first().waitFor()
   await shoot('signals')
@@ -84,4 +90,4 @@ try {
   fs.rmSync(tmp, { recursive: true, force: true })
 }
 if (errors.length) { console.error(errors.join('\n')); process.exit(1) }
-console.log('wrote board.png, signals.png')
+console.log('wrote board.png, prompt-change.png, signals.png')

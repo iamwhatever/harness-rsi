@@ -22,6 +22,7 @@ ROLES = {
     "rsi-reviewer-value": ("proposal", set()),
     "rsi-reviewer-risk": ("proposal", set()),
     "rsi-question-setter": ("exam", set()),
+    "rsi-prompt-proposer": (None, set()),  # replies with one prompt change, no row schema
 }
 # Tools that could write files, run code, push, merge, spawn, or reach Slack.
 FORBIDDEN_WORDS = ("write", "bash", "shell", "aws", "slack", "send", "post", "spawn", "session_send", "git", "merge")
@@ -74,7 +75,7 @@ def test_question_setter_has_no_access_path_to_proposals():
 @pytest.mark.parametrize("name", sorted(ROLES))
 def test_prompt_names_its_schema_and_its_must_nots(name):
     prompt = agent(name)["prompt"]
-    assert f"schemas/{ROLES[name][0]}.schema.json" in prompt
+    assert ROLES[name][0] is None or f"schemas/{ROLES[name][0]}.schema.json" in prompt
     assert "Must not:" in prompt
     for word in ("push", "merge", "Slack"):
         assert word in prompt.split("Must not:")[1]

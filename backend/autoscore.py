@@ -34,6 +34,16 @@ def cards():
     return {i: {**p, "decision": latest.get(i, p["decision"])} for i, p in out.items()}
 
 
+def round_versions(card_id):
+    """The prompt versions of the round that wrote ``card_id`` (its ``prompt_versions.json``), or None."""
+    for d in [*sorted(store.data_dir().glob("rounds/round-*")), store.data_dir()]:
+        doc, used = d / "proposals.json", d / "prompt_versions.json"
+        if card_id and doc.is_file() and used.is_file() and any(
+                p.get("id") == card_id for p in json.loads(doc.read_text(encoding="utf-8"))):
+            return json.loads(used.read_text(encoding="utf-8"))
+    return None
+
+
 def exams_for(card, bank):
     return [e for e in bank if e["id"] in card["exam_ids"] or set(e.get("origin", [])) & set(card["signal_ids"])]
 
@@ -113,6 +123,7 @@ def score(kc, row, pr, card, bank):
     new = {**row, "state": state, "base_sha": pr["baseRefOid"], "head_sha": pr["headRefOid"],
            "merged_sha": (pr["mergeCommit"] or {}).get("oid") if state == "merged" else None,
            "decision": card["decision"] if card else None}
+    new["prompt_versions"] = round_versions(row["card_id"])
     exams = exams_for(card, bank) if card else []
     new["exam_ids"] = [e["id"] for e in exams]
     new["note"] = "; ".join(n for n in ("" if card else "no card", "" if exams else "no exam",
