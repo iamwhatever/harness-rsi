@@ -119,11 +119,11 @@ def facts(work: Path, signals: list[dict], metrics: list[str], examples: list[di
 
 
 def examples(bank_hidden: Path) -> list[dict]:
-    """Up to one published exam per check kind, smallest first."""
+    """Up to one regression exam (judged, no longer hidden) per check kind, smallest first: a hidden exam never reaches a prompt."""
     seen, out = set(), []
     for path in sorted(bank_hidden.glob("exam_*.json"), key=lambda p: p.stat().st_size) if bank_hidden.is_dir() else []:
         x = json.loads(path.read_text(encoding="utf-8"))
-        if x.get("check", {}).get("kind") not in seen:
+        if x.get("visibility") == "regression" and x.get("check", {}).get("kind") not in seen:
             seen.add(x["check"]["kind"])
             out.append(x)
     return out

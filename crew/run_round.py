@@ -11,7 +11,8 @@ main = dropped) -> one HTML mock artifact per proposal. Agents,
 collectors and the mock saver are injected, so tests run fakes.
 
 Data dir (``$HARNESS_RSI_DATA``, default ``~/.kiro/crew/harness-rsi-data``):
-``signals.jsonl``, ``proposals.json``, ``exams/hidden/<id>.json``, ``mocks/``. That dir is the round's
+``signals.jsonl``, ``proposals.json``, ``exams/hidden/<id>.json``, ``mocks/``,
+``prompt_versions.json`` (agent -> prompt version id, ``crew/prompts.py``). That dir is the round's
 record; with ``bank`` set, each exam is then published into the shared bank (``--bank``, default
 ``~/.kiro/crew/harness-rsi-data/exams``) once the judge's dry run passes it, else filed under
 ``rejected/`` with its reason. ``--publish ROUND_DIR`` does only that step for an earlier round.
@@ -29,7 +30,6 @@ import datetime as dt
 import html
 import json
 import os
-import shutil
 import subprocess
 import sys
 import urllib.request
@@ -42,6 +42,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "crew"))
 import enrich  # noqa: E402
 import prior_art  # noqa: E402
+import prompts  # noqa: E402
 import reduce  # noqa: E402
 import target_facts  # noqa: E402
 
@@ -328,8 +329,10 @@ def run_round(*, agent: Agent, collectors: list[Callable[[], list[dict]]], save_
         (data / "exams" / "hidden" / f"{x['id']}.json").write_text(json.dumps(x, indent=2) + "\n")
     (data / "signals.jsonl").write_text("".join(json.dumps(s) + "\n" for s in signals))
     (data / "proposals.json").write_text(json.dumps(props, indent=2) + "\n")
+    used = prompts.versions(prompts.effective(data))  # which prompt text each agent ran
+    (data / "prompt_versions.json").write_text(json.dumps(used, indent=1) + "\n")
     out = {"signals": signals, "exams": exams, "proposals": props, "refused_exams": refused,
-           "dropped_prior_art": dropped}
+           "dropped_prior_art": dropped, "prompt_versions": used}
     if bank and classify_bank:  # the round ends: its exams join the shared bank, validated
         out["published"] = publish_round(data, bank, classify_bank)
     return out
@@ -338,12 +341,15 @@ def run_round(*, agent: Agent, collectors: list[Callable[[], list[dict]]], save_
 # ---- real wiring (not used by tests) ----
 
 
-def kiro_agent(run_dir: Path, replies: dict[str, str]) -> Agent:
-    """Run each role with kiro-cli from a dir holding local copies of crew/agents/*.json."""
+def kiro_agent(run_dir: Path, replies: dict[str, str], texts: dict[str, str] | None = None) -> Agent:
+    """Run each role with kiro-cli from copies of crew/agents/*.json carrying ``texts`` (default: run_dir's data dir's effective prompts)."""
     agents = run_dir / ".kiro" / "agents"
     agents.mkdir(parents=True, exist_ok=True)
+    texts = prompts.effective(run_dir.parent) if texts is None else texts
     for spec in (ROOT / "crew" / "agents").glob("*.json"):
-        shutil.copy(spec, agents / spec.name)
+        doc = json.loads(spec.read_text(encoding="utf-8"))
+        doc["prompt"] = texts.get(spec.stem, doc["prompt"])
+        (agents / spec.name).write_text(json.dumps(doc, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
     def call(name: str, message: str) -> str:
         if name in replies:
@@ -450,8 +456,9 @@ def main(argv: list[str]) -> int:
                        check_exam=validate_checker(args.exam_workdir), prior=gh_prior,
                        bank=args.bank, classify_bank=bank_classifier(args.exam_workdir),
                        facts=setter_facts(args.exam_workdir, args.bank))
-    published = result.pop("published", {})
-    print(json.dumps({**{k: len(v) for k, v in result.items()}, **{k: v for k, v in published.items() if k != "notes"}}))
+    published, used = result.pop("published", {}), result.pop("prompt_versions")
+    print(json.dumps({**{k: len(v) for k, v in result.items()}, **{k: v for k, v in published.items() if k != "notes"},
+                      "prompt_versions": used}))
     return 0
 
 
