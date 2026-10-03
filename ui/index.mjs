@@ -1,13 +1,17 @@
 // Harness RSI priority board. Hand-written ESM, no build step: the host's import
-// map resolves `react` and `@kirocrew/app-sdk/ui`, as it does for a built bundle.
+// map resolves `react`, `lucide-react` and `@kirocrew/app-sdk(/ui)`, as it does for a built bundle.
+// Host components only, laid out like Dev Fleet / Issue Radar; every word on screen comes from strings.mjs.
 import { createElement as h, useCallback, useEffect, useMemo, useState } from 'react'
-import { useAppApi } from '@kirocrew/app-sdk'
-import { Badge, Btn, Card, EmptyState, PageHeader } from '@kirocrew/app-sdk/ui'
+import * as sdk from '@kirocrew/app-sdk'
+import * as UI from '@kirocrew/app-sdk/ui'
+import { History, Inbox, Radio, Wand2 } from 'lucide-react'
+import { getLang, has, pickLang, setLang, t } from './strings.mjs'
+import { demoSource, isDemo } from './fake-data.mjs'
 
 const BASE = '/api/apps/harness-rsi'
 
 /** The data source over the app backend. `load` answers { proposals, signals, images }
- *  (images[id].before is a screenshot URL of the page today); tests pass fake-data.mjs instead. */
+ *  (images[id].before is a screenshot URL of the page today); demo mode uses fake-data.mjs instead. */
 export function backendSource(api) {
   return {
     load: async () => {
@@ -35,7 +39,7 @@ export function backendSource(api) {
   }
 }
 
-const words = (t) => String(t || '').split(/[\s,]+/).filter(Boolean)
+const words = (x) => String(x || '').split(/[\s,]+/).filter(Boolean)
 /** Form strings -> the POST /settings body; a blank command keeps the saved one (and its args). */
 export const parseSettings = (f) => {
   const command = String(f.command || '').trim()
@@ -45,348 +49,307 @@ export const parseSettings = (f) => {
 /** The backend shows only whether a command is set, so its inputs start blank. */
 export const toForm = (s) => ({ saved: s, command: '', args: '', channels: s.channels.join(', '),
   window_days: String(s.window_days), workspace_url: s.workspace_url })
-export const slackNote = (s) => (s?.command_set ? `Slack: on, reading ${s.channels.length} channel(s) over ${s.window_days} days`
-  : 'Slack collection is off: set the Slack MCP command to turn it on.')
-const FIELDS = [['command', 'Slack MCP command (blank keeps the saved one)'], ['args', 'Arguments'], ['channels', 'Channel ids'],
-  ['window_days', 'Window (days)'], ['workspace_url', 'Workspace URL (for links)']]
+export const slackNote = (s) => (s?.command_set ? t('slackOn', { n: s.channels.length, days: s.window_days }) : t('slackOff'))
+
+const LABEL = 'text-[11px] uppercase tracking-wide text-muted font-semibold mb-1'
+const MUTED = 'text-[13px] text-muted'
+const Section = ({ title, children }) => h('div', { className: 'min-w-0' }, h('div', { className: LABEL }, title), children)
+const Saver = ({ onSave, note, label }) => h('div', { className: 'flex flex-wrap items-center gap-3 mt-2' },
+  h(UI.Btn, { type: 'button', primary: true, onClick: onSave }, label || t('save')), h('span', { className: MUTED, 'aria-live': 'polite' }, note))
+const Table = ({ caption, cols, children, testId }) => h('div', { className: 'overflow-x-auto' },
+  h('table', { className: 'w-full border-collapse text-[13px]', 'data-testid': testId },
+    caption ? h('caption', { className: `${LABEL} text-left` }, caption) : null,
+    h('thead', null, h('tr', null, cols.map((c) => h('th', { key: c, scope: 'col', className: 'text-left text-muted font-semibold px-2 py-2 border-b border-border whitespace-nowrap' }, c)))),
+    h('tbody', null, children)))
+const TD = 'px-2 py-2 border-b border-border'
+const td = (...c) => h('td', { className: TD }, ...c)
+
+const FIELDS = ['command', 'args', 'channels', 'window_days', 'workspace_url']
 /** The Slack settings form: stateless, so the page owns the values. */
 export function SettingsForm({ form, onChange, onSave, note }) {
-  const input = { padding: '6px 8px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--panel)',
-    color: 'var(--text)', fontSize: 13, width: '100%' }
-  return h(Card, { 'data-testid': 'settings' },
-    h('div', { 'data-testid': 'slack-configured' }, `Slack MCP command configured: ${form.saved.command_set ? 'yes' : 'no'}`),
-    h('div', { style: muted, 'data-testid': 'slack-note' }, slackNote(form.saved)),
-    FIELDS.map(([k, text]) => h('label', { key: k, style: { display: 'block', marginTop: 10, ...muted } }, text,
-      h('input', { name: k, value: form[k] ?? '', style: input, onChange: (e) => onChange({ ...form, [k]: e.target.value }) }))),
-    h('div', { style: row({ alignItems: 'center' }) }, h(Btn, { type: 'button', primary: true, onClick: onSave }, 'Save'),
-      h('span', { style: muted, 'aria-live': 'polite' }, note)))
+  return h(UI.SettingsSection, { title: t('slackTitle') },
+    h('div', { className: MUTED, 'data-testid': 'slack-configured' }, t(form.saved.command_set ? 'slackSetYes' : 'slackSetNo')),
+    h('div', { className: MUTED, 'data-testid': 'slack-note' }, slackNote(form.saved)),
+    FIELDS.map((k) => h(UI.SettingsInput, { key: k, name: k, label: t(`field_${k}`), value: form[k] ?? '', onChange: (v) => onChange({ ...form, [k]: v }) })),
+    h(Saver, { onSave, note }))
 }
 
-export const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
-/** The owner's schedule (backend.schedule): both jobs off until checked here and saved. */
+/** The owner's schedule (backend.schedule): both jobs off until switched on here and saved. */
 export function ScheduleForm({ conf, onChange, onSave, note }) {
-  const set = (k) => (e) => onChange({ ...conf, [k]: e.target.type === 'checkbox' ? e.target.checked : e.target.value })
-  const box = (k, text) => h('label', { style: { display: 'flex', gap: 8, marginTop: 10 } },
-    h('input', { type: 'checkbox', name: k, checked: conf[k], onChange: set(k) }), text)
-  const field = { display: 'block', marginTop: 10, ...muted }
-  return h(Card, { 'data-testid': 'schedule' },
-    h('div', { style: label }, 'Schedule'),
-    h('div', { style: muted }, 'Off until you check a box and save. Each run ends in one notification; nothing posts to Slack, opens a PR or merges.'),
-    box('round_enabled', 'Run a design-crew round once a week'),
-    h('div', { style: row({ marginTop: 6 }) },
-      h('label', { style: field }, 'Day ', h('select', { name: 'weekday', value: conf.weekday,
-        onChange: (e) => onChange({ ...conf, weekday: Number(e.target.value) }) }, DAYS.map((d, i) => h('option', { key: d, value: i }, d)))),
-      h('label', { style: field }, 'Hour (0-23, local) ', h('input', { name: 'hour', type: 'number', min: 0, max: 23, value: conf.hour,
-        onChange: (e) => onChange({ ...conf, hour: Number(e.target.value) }) }))),
-    box('regress_enabled', 'Check the regression exams once a day after new merges'),
-    box('score_enabled', 'Score linked KiroCrew PRs with the judge every hour (never runs fork PRs)'),
-    h('label', { style: field }, 'KiroCrew clone for the regression check (absolute path)',
-      h('input', { name: 'kirocrew_dir', value: conf.kirocrew_dir, onChange: set('kirocrew_dir'), style: { width: '100%' } })),
-    h('div', { style: row({ alignItems: 'center' }) }, h(Btn, { type: 'button', primary: true, onClick: onSave }, 'Save schedule'),
-      h('span', { style: muted, 'aria-live': 'polite' }, note)))
+  const tog = (k) => h(UI.SettingsToggle, { key: k, name: k, label: t(`sched_${k}`), checked: !!conf[k], onChange: (v) => onChange({ ...conf, [k]: v }) })
+  return h(UI.SettingsSection, { title: t('schedTitle') },
+    h('div', { className: MUTED }, t('schedIntro')),
+    tog('round_enabled'),
+    h(UI.SettingsSelect, { name: 'weekday', label: t('schedDay'), value: String(conf.weekday), options: ['0', '1', '2', '3', '4', '5', '6'],
+      optionLabels: t('days').split(','), onChange: (v) => onChange({ ...conf, weekday: Number(v) }) }),
+    h(UI.SettingsInput, { name: 'hour', type: 'number', min: 0, max: 23, label: t('schedHour'), value: String(conf.hour), onChange: (v) => onChange({ ...conf, hour: Number(v) }) }),
+    tog('regress_enabled'), tog('score_enabled'),
+    h(UI.SettingsInput, { name: 'kirocrew_dir', label: t('schedDir'), value: conf.kirocrew_dir, onChange: (v) => onChange({ ...conf, kirocrew_dir: v }) }),
+    h(Saver, { onSave, note }))
 }
-/** The owner's auto-dispatch (backend.dispatch): off until checked here and saved. */
+
+/** The owner's auto-dispatch (backend.dispatch): off until switched on here and saved. */
 export function DispatchForm({ conf, onChange, onSave, note }) {
-  const field = { display: 'block', marginTop: 10, ...muted }
-  return h(Card, { 'data-testid': 'dispatch' },
-    h('div', { style: label }, 'Auto-dispatch'),
-    h('div', { style: muted }, 'Off until you check the box and save. When on, 做 on a proposal card opens one worker chat that builds it as one small PR, CI green, never merged. Prompt-change cards never dispatch.'),
-    h('label', { style: { display: 'flex', gap: 8, marginTop: 10 } }, h('input', { type: 'checkbox', name: 'auto_dispatch',
-      checked: conf.auto_dispatch, onChange: (e) => onChange({ ...conf, auto_dispatch: e.target.checked }) }), 'Open a worker chat when I press 做'),
-    h('label', { style: field }, 'Target repos (allowlist)', h('input', { name: 'repos', value: conf.repos.join(', '), style: { width: '100%' },
-      onChange: (e) => onChange({ ...conf, repos: words(e.target.value) }) })),
-    h('label', { style: field }, 'Dispatches a day (1-10) ', h('input', { name: 'daily_cap', type: 'number', min: 1, max: 10,
-      value: conf.daily_cap, onChange: (e) => onChange({ ...conf, daily_cap: Number(e.target.value) }) })),
-    h('div', { style: row({ alignItems: 'center' }) }, h(Btn, { type: 'button', primary: true, onClick: onSave }, 'Save auto-dispatch'),
-      h('span', { style: muted, 'aria-live': 'polite' }, note)))
+  return h(UI.SettingsSection, { title: t('dispTitle') },
+    h('div', { className: MUTED }, t('dispIntro')),
+    h(UI.SettingsToggle, { name: 'auto_dispatch', label: t('dispToggle'), checked: !!conf.auto_dispatch, onChange: (v) => onChange({ ...conf, auto_dispatch: v }) }),
+    h(UI.SettingsInput, { name: 'repos', label: t('dispRepos'), value: conf.repos.join(', '), onChange: (v) => onChange({ ...conf, repos: words(v) }) }),
+    h(UI.SettingsInput, { name: 'daily_cap', type: 'number', min: 1, max: 10, label: t('dispCap'), value: String(conf.daily_cap), onChange: (v) => onChange({ ...conf, daily_cap: Number(v) }) }),
+    h(Saver, { onSave, note }))
 }
+
 /** A card's worker-chat line: opening, a link to the chat, or why the dispatch failed. */
 export function DispatchLine({ row: d }) {
   if (!d) return null
-  if (d.state === 'error') return h('div', { role: 'alert', 'data-testid': 'dispatch-line', style: { color: 'var(--danger)', fontSize: 13, marginTop: 8 } }, `Dispatch failed: ${d.error}`)
-  return h('div', { 'data-testid': 'dispatch-line', style: { ...muted, marginTop: 8 } }, d.state === 'pending' ? 'Opening a worker chat…'
-    : h('a', { href: `/chat?slot=${encodeURIComponent(d.session)}`, style: { color: 'var(--accent)' } }, `Worker chat: ${d.session}`))
+  if (d.state === 'error') return h('div', { role: 'alert', 'data-testid': 'dispatch-line', className: 'text-[13px] text-danger mt-2' }, t('dispFailed', { e: d.error }))
+  return h('div', { 'data-testid': 'dispatch-line', className: `${MUTED} mt-2` }, d.state === 'pending' ? t('dispOpening')
+    : h('a', { href: `/chat?slot=${encodeURIComponent(d.session)}`, className: 'text-accent hover:underline' }, t('dispChat', { s: d.session })))
 }
-const at = (s) => (s ? new Date(s).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }) : '')
+
+const at = (s) => (s ? new Date(s).toLocaleString(getLang(), { dateStyle: 'short', timeStyle: 'short', hourCycle: 'h23' }) : '')
 /** One line of result for a run record. */
-export const runResult = (r) => (r.error ? `Failed: ${r.error}` : r.kind === 'round' ? `${r.cards} cards from ${r.signals} signals`
-  : `${r.regressions ? `${r.regressions} regression(s)` : 'No regressions'} at ${String(r.sha || '').slice(0, 7)}`)
+export const runResult = (r) => (r.error ? t('runFailed', { e: r.error }) : r.kind === 'round' ? t('runCards', { cards: r.cards, signals: r.signals })
+  : t(r.regressions ? 'runRegress' : 'runClean', { n: r.regressions, sha: String(r.sha || '').slice(0, 7) }))
 /** The last scheduled runs, newest first. */
 export function Runs({ runs }) {
-  const cell = { padding: '6px 10px', borderBottom: '1px solid var(--border)', textAlign: 'left', fontSize: 13 }
-  return h(Card, { 'data-testid': 'schedule-runs' }, h('table', { style: { width: '100%', borderCollapse: 'collapse' } },
-    h('caption', { style: { ...label, textAlign: 'left' } }, 'Last scheduled runs'),
-    h('thead', null, h('tr', null, ['Job', 'Started', 'Ended', 'Result'].map((c) => h('th', { key: c, scope: 'col', style: { ...cell, ...muted } }, c)))),
-    h('tbody', null, runs.length ? runs.map((r) => h('tr', { key: r.kind + r.start, 'data-testid': 'run-row' },
-      [r.kind === 'round' ? 'Weekly round' : 'Daily regression', at(r.start), at(r.end), runResult(r)].map((c, i) => h('td', { key: i, style: cell }, c))))
-      : h('tr', null, h('td', { colSpan: 4, style: { ...cell, ...muted } }, 'No scheduled runs yet')))))
+  if (!runs.length) return h(UI.EmptyState, { icon: h(History, { size: 28 }), title: t('noRuns'), testId: 'no-runs' })
+  return h(Table, { caption: t('runsTitle'), cols: [t('colJob'), t('colStarted'), t('colEnded'), t('colResult')], testId: 'schedule-runs' },
+    runs.map((r) => h('tr', { key: r.kind + r.start, 'data-testid': 'run-row' },
+      [t(r.kind === 'round' ? 'jobRound' : 'jobRegress'), at(r.start), at(r.end), runResult(r)].map((c, i) => h('td', { key: i, className: TD }, c)))))
 }
 
-export const DECISIONS = [['do', '做', 'Doing'], ['skip', '不做', 'Not doing'], ['later', '以后再说', 'Later']]
-
+export const DECISIONS = ['do', 'skip', 'later']
 /** Most people first, then the shortest window. */
 export const byHeat = (list) =>
   [...list].sort((a, b) => b.heat.people - a.heat.people || a.heat.window_days - b.heat.window_days)
-
 /** Hottest first; a merged duplicate sinks below every primary signal. */
 export const signalsByHeat = (list) =>
   [...list].sort((a, b) => !!a.dedup_of - !!b.dedup_of
     || b.mentions.people - a.mentions.people || b.mentions.count - a.mentions.count)
-
 export const applyDecision = (list, id, decision) => list.map((p) => (p.id === id ? { ...p, decision } : p))
 
-// Host --muted is 4.3:1 on a card; mixing in --text lifts it past 4.5:1 in every theme.
-const MUTED = 'color-mix(in srgb, var(--muted) 70%, var(--text))'
-const muted = { color: MUTED, fontSize: 13 }
-const label = { ...muted, fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.4, margin: '0 0 4px' }
-const row = (extra) => ({ display: 'flex', gap: 12, marginTop: 12, ...extra })
-const frameBox = { height: 150, borderRadius: 8, border: '1px solid var(--border)', background: 'var(--panel)',
-  display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }
-
-const Frame = ({ title, children }) => h('figure', { style: { margin: 0, flex: 1, minWidth: 0 } },
-  h('figcaption', { style: label }, title), h('div', { style: frameBox }, children))
-const Section = ({ title, children }) => h('div', null, h('div', { style: label }, title), children)
-
 export const prUrl = (pr) => `https://github.com/${pr.replace('#', '/pull/')}`
-const runText = (r) => `${r.verdict} ${r.pass}/${r.pass + r.fail + r.error}`
+/** A data word (state, layer, verdict) in the page's language, or as it is when the table does not know it. */
+const word = (prefix, v) => (has(`${prefix}_${v}`) ? t(`${prefix}_${v}`) : v)
+const runText = (r) => `${word('judge', r.verdict)} ${r.pass}/${r.pass + r.fail + r.error}`
 /** The judge's line for one linked PR: base -> head, or why there is no score. */
-export const scoreText = (o) => (o.score.head ? `Judge: base ${runText(o.score.base)} → head ${runText(o.score.head)}`
-  : o.note ? `Not scored: ${o.note}` : 'Not scored yet')
+export const scoreText = (o) => (o.score.head ? t('scoreJudge', { base: runText(o.score.base), head: runText(o.score.head) })
+  : o.note ? t('scoreNot', { note: o.note }) : t('scoreYet'))
 /** The newest post-merge regress result for the card's exams, or ''. */
 export const regressLine = (o) => {
   const g = o.regress.at(-1)
-  if (!g) return o.state === 'merged' && o.exam_ids.length ? 'Regress: not run yet' : ''
+  if (!g) return o.state === 'merged' && o.exam_ids.length ? t('regressNotRun') : ''
   const got = Object.values(g.exams)
-  return `Regress @ ${g.sha.slice(0, 7)}: ${got.filter((x) => x === 'pass').length}/${got.length} pass`
-    + (g.regressions ? ` · ${g.regressions} regression(s)` : '')
+  return t(g.regressions ? 'regressLineBad' : 'regressLine', { sha: g.sha.slice(0, 7), pass: got.filter((x) => x === 'pass').length, n: got.length, bad: g.regressions })
 }
 /** A card's product PRs with their scores; with `onLink` a PR number can be linked. */
 export function Outcomes({ proposal: p, outcomes, onLink }) {
   const submit = (e) => { e.preventDefault(); const n = Number(e.target.elements.pr.value); if (n > 0) onLink(p.id, n) }
-  return h(Section, { title: 'Product PR' }, outcomes.map((o) => h('div', { key: o.pr, 'data-testid': 'outcome',
-    style: { display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginTop: 4 } },
-  h('a', { href: prUrl(o.pr), target: '_blank', rel: 'noreferrer', style: { color: 'var(--accent)' } }, o.pr.split('/').pop()),
-  h(Badge, { variant: o.state === 'merged' ? 'ok' : 'muted' }, o.state),
-  h('span', { 'data-testid': 'score' }, scoreText(o)), h('span', { style: muted }, regressLine(o)))),
-  !outcomes.length ? h('div', { style: muted }, 'No PR linked') : null,
-  onLink ? h('form', { onSubmit: submit, style: row({ marginTop: 6, gap: 8, alignItems: 'center' }) },
-    h('input', { name: 'pr', type: 'number', min: 1, placeholder: 'KiroCrew PR #', 'aria-label': `KiroCrew PR number for: ${p.pain}`,
-      style: { width: 140 } }), h(Btn, { type: 'submit' }, 'Link PR')) : null)
+  return h(Section, { title: t('secPr') }, outcomes.map((o) => h('div', { key: o.pr, 'data-testid': 'outcome', className: 'flex flex-wrap items-center gap-2 mt-1' },
+    h('a', { href: prUrl(o.pr), target: '_blank', rel: 'noreferrer', className: 'text-accent hover:underline' }, o.pr.split('/').pop()),
+    h(UI.Badge, { variant: o.state === 'merged' ? 'ok' : 'muted' }, word('state', o.state)),
+    h('span', { 'data-testid': 'score' }, scoreText(o)), h('span', { className: MUTED }, regressLine(o)))),
+  !outcomes.length ? h('div', { className: MUTED }, t('noPr')) : null,
+  onLink ? h('form', { onSubmit: submit, className: 'flex flex-wrap items-center gap-2 mt-2' },
+    h(UI.Input, { name: 'pr', type: 'number', min: 1, placeholder: t('prPlaceholder'), 'aria-label': t('prAria', { pain: p.pain }), className: 'w-32' }),
+    h(UI.Btn, { type: 'submit' }, t('linkPr'))) : null)
 }
 
-export function ProposalCard({ proposal: p, before, onDecide, outcomes, onLink, dispatch }) {
+const PRIOR = 'prior_art: '
+const Frame = ({ title, children }) => h('figure', { className: 'min-w-0 m-0' }, h('figcaption', { className: LABEL }, title),
+  h('div', { className: 'h-36 rounded-md border border-border bg-bg-elevated flex items-center justify-center overflow-hidden' }, children))
+const Decide = ({ value, label, onDecide }) => h('div', { role: 'group', 'aria-label': label, className: 'flex flex-wrap items-center gap-2 mt-3' },
+  DECISIONS.map((d) => h(UI.Btn, { key: d, type: 'button', 'data-decision': d, primary: value === d, 'aria-pressed': value === d, onClick: () => onDecide(d) }, t(`dec_${d}`))),
+  h('span', { className: MUTED, 'aria-live': 'polite' }, value ? t('decided', { d: t(`dec_${value}`) }) : t('undecided')))
+
+/** One proposal: title, heat, sources, before/after, cost, prior art, exams, score, decision. */
+export function ProposalCard({ proposal: p, before, onDecide, outcomes, onLink, dispatch, signals = [] }) {
   const titleId = `pain-${p.id}`
   const slug = p.mock_artifact_slug
-  return h(Card, { role: 'region', 'aria-labelledby': titleId, 'data-testid': 'proposal-card', 'data-id': p.id },
-    h('div', { style: { display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' } },
-      h('h3', { id: titleId, style: { margin: 0, fontSize: 16, fontWeight: 600, color: 'var(--text-strong)' } }, p.pain),
-      h(Badge, { variant: 'warn', 'data-testid': 'heat' }, `${p.heat.people} people / ${p.heat.window_days} days`)),
-    h('div', { style: row() },
-      h(Frame, { title: 'Before' }, before
-        ? h('img', { src: before, alt: `Current page for: ${p.pain}`,
-          style: { width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'top left' } })
-        : h('span', { style: muted }, 'No screenshot yet')),
-      h(Frame, { title: 'After (mock)' }, slug
-        ? h('a', { href: `/artifacts/${slug}`, style: { color: 'var(--accent)', fontSize: 13 } }, `Open mock: ${slug}`)
-        : h('span', { style: muted }, 'No mock yet'))),
-    h('div', { style: row({ flexWrap: 'wrap', gap: 32 }) },
-      h(Section, { title: 'Cost' },
-        h('div', { 'data-testid': 'cost' }, `${p.cost.files} files · ${p.cost.lines} lines`),
-        h('div', { style: muted }, p.cost.risks.length ? `Risks: ${p.cost.risks.join(', ')}` : 'No known risks')),
-      h(Section, { title: 'Exams' }, h('div', { style: { display: 'flex', gap: 6, flexWrap: 'wrap' } },
-        p.exam_ids.map((e) => h(Badge, { key: e, variant: 'muted' }, e)))),
+  const srcs = signals.filter((s) => p.signal_ids.includes(s.id))
+  const prior = p.cost.risks.filter((r) => r.startsWith(PRIOR)).map((r) => r.slice(PRIOR.length))
+  const risks = p.cost.risks.filter((r) => !r.startsWith(PRIOR))
+  return h(UI.Card, { role: 'region', 'aria-labelledby': titleId, 'data-testid': 'proposal-card', 'data-id': p.id },
+    h('div', { className: 'flex flex-wrap items-center justify-between gap-2' },
+      h('h3', { id: titleId, className: 'm-0 text-[15px] font-semibold text-text-strong min-w-0' }, p.pain),
+      h(UI.Badge, { variant: 'warn', 'data-testid': 'heat' }, t('heat', { people: p.heat.people, days: p.heat.window_days }))),
+    h('div', { className: 'flex flex-wrap items-center gap-2 mt-2', 'data-testid': 'sources' },
+      srcs.length ? srcs.map((s) => h('a', { key: s.id, href: s.links[0], target: '_blank', rel: 'noreferrer', className: 'text-accent hover:underline text-[12px] font-mono' }, s.source))
+        : h('span', { className: MUTED }, t('noSources'))),
+    h('div', { className: 'grid gap-3 sm:grid-cols-2 mt-3' },
+      h(Frame, { title: t('before') }, before ? h('img', { src: before, alt: t('beforeAlt', { pain: p.pain }), className: 'w-full h-full object-cover' })
+        : h('span', { className: MUTED }, t('noShot'))),
+      h(Frame, { title: t('after') }, slug ? h('a', { href: `/artifacts/${slug}`, className: 'text-accent hover:underline text-[13px]' }, t('openMock', { slug }))
+        : h('span', { className: MUTED }, t('noMock')))),
+    h('div', { className: 'grid gap-3 sm:grid-cols-2 mt-3' },
+      h(Section, { title: t('secCost') }, h('div', { 'data-testid': 'cost' }, t('cost', { files: p.cost.files, lines: p.cost.lines })),
+        h('div', { className: MUTED }, risks.length ? t('risks', { r: risks.join(', ') }) : t('noRisks'))),
+      h(Section, { title: t('secPrior') }, h('div', { className: MUTED, 'data-testid': 'prior-art' }, prior.length ? prior.join(' · ') : t('noPrior'))),
+      h(Section, { title: t('secExams') }, h('div', { className: 'flex flex-wrap gap-1.5' }, p.exam_ids.map((e) => h(UI.Badge, { key: e, variant: 'muted' }, e)))),
       outcomes || onLink ? h(Outcomes, { proposal: p, outcomes: outcomes || [], onLink }) : null),
-    h('div', { role: 'group', 'aria-label': `Decision for: ${p.pain}`, style: row({ gap: 8, alignItems: 'center' }) },
-      DECISIONS.map(([value, text]) => h(Btn, { key: value, type: 'button', 'data-decision': value,
-        primary: p.decision === value, 'aria-pressed': p.decision === value, onClick: () => onDecide(p.id, value) }, text)),
-      h('span', { style: muted, 'aria-live': 'polite' },
-        p.decision ? `Decided: ${DECISIONS.find((d) => d[0] === p.decision)[2]}` : 'Not decided')),
+    h(Decide, { value: p.decision, label: t('decAria', { pain: p.pain }), onDecide: (d) => onDecide(p.id, d) }),
     h(DispatchLine, { row: dispatch }))
 }
 
 const VERDICT = { better: 'ok', worse: 'err', same: 'muted' }
-/** One proposed crew-prompt change: its A/B numbers and diff. 做 applies it (a new prompt version). */
+/** One proposed crew-prompt change: its A/B numbers and diff. Do applies it (a new prompt version). */
 export function PromptChangeCard({ change: c, onDecide }) {
   const titleId = `pc-${c.id}`
-  const cell = { padding: '4px 10px', borderBottom: '1px solid var(--border)', textAlign: 'left', fontSize: 13 }
   const num = (x) => (x == null ? '—' : String(x))
-  return h(Card, { role: 'region', 'aria-labelledby': titleId, 'data-testid': 'prompt-change-card', 'data-id': c.id },
-    h('div', { style: label }, 'Prompt change'),
-    h('h3', { id: titleId, style: { margin: 0, fontSize: 16, fontWeight: 600, color: 'var(--text-strong)' } }, `${c.agent}: ${c.summary}`),
-    h('div', { style: { ...muted, marginTop: 4 } }, `${c.from} → ${c.to}`),
-    c.ab ? h('table', { style: { marginTop: 12, borderCollapse: 'collapse' }, 'data-testid': 'prompt-ab' },
-      h('caption', { style: { ...label, textAlign: 'left' } }, `A/B on rounds ${c.ab.rounds.join(', ')}, ${c.ab.reps} runs each`),
-      h('thead', null, h('tr', null, ['Metric', 'A (now)', 'B (change)', 'Verdict'].map((t) => h('th', { key: t, scope: 'col', style: { ...cell, ...muted } }, t)))),
-      h('tbody', null, Object.entries(c.ab.metrics).map(([m, v]) => h('tr', { key: m },
-        h('td', { style: cell }, h('code', null, m)), h('td', { style: cell }, num(v.A)), h('td', { style: cell }, num(v.B)),
-        h('td', { style: cell }, h(Badge, { variant: VERDICT[v.verdict] || 'muted' }, v.verdict))))))
-      : h('div', { style: { ...muted, marginTop: 12 } }, 'No A/B run yet'),
-    h('details', { style: { marginTop: 12 } }, h('summary', { style: muted }, 'Show the diff'),
-      h('pre', { style: { fontSize: 12, whiteSpace: 'pre-wrap', overflowX: 'auto' } }, c.diff)),
-    h('div', { role: 'group', 'aria-label': `Decision for prompt change ${c.id}`, style: row({ gap: 8, alignItems: 'center' }) },
-      c.status === 'applied' ? h('span', { style: muted }, `Applied: ${c.agent} now runs ${c.to}`)
-        : DECISIONS.map(([value, text]) => h(Btn, { key: value, type: 'button', 'data-decision': value, primary: c.status === value,
-          'aria-pressed': c.status === value, onClick: () => onDecide(c.id, value) }, text))))
+  return h(UI.Card, { role: 'region', 'aria-labelledby': titleId, 'data-testid': 'prompt-change-card', 'data-id': c.id },
+    h('div', { className: LABEL }, t('pcLabel')),
+    h('h3', { id: titleId, className: 'm-0 text-[15px] font-semibold text-text-strong' }, `${c.agent}: ${c.summary}`),
+    h('div', { className: `${MUTED} mt-1` }, `${c.from} → ${c.to}`),
+    c.ab ? h('div', { className: 'mt-3' }, h(Table, { testId: 'prompt-ab', caption: t('abCaption', { rounds: c.ab.rounds.join(', '), reps: c.ab.reps }),
+      cols: [t('colMetric'), t('colA'), t('colB'), t('colVerdict')] }, Object.entries(c.ab.metrics).map(([m, v]) => h('tr', { key: m },
+      td(h('code', null, m)), td(num(v.A)), td(num(v.B)), td(h(UI.Badge, { variant: VERDICT[v.verdict] || 'muted' }, word('verdict', v.verdict)))))))
+      : h('div', { className: `${MUTED} mt-3` }, t('noAb')),
+    h('details', { className: 'mt-3' }, h('summary', { className: MUTED }, t('showDiff')),
+      h('pre', { className: 'text-[12px] whitespace-pre-wrap overflow-x-auto' }, c.diff)),
+    c.status === 'applied' ? h('div', { className: `${MUTED} mt-3` }, t('pcApplied', { agent: c.agent, to: c.to }))
+      : h(Decide, { value: c.status === 'pending' ? null : c.status, label: t('pcAria', { id: c.id }), onDecide: (d) => onDecide(c.id, d) }))
 }
 
-export function Board({ proposals, images = {}, onDecide, outcomes, onLink, dispatches = [] }) {
-  if (!proposals.length) return h(EmptyState, { icon: null, title: 'No proposals yet' })
-  return h('div', { style: { display: 'flex', flexDirection: 'column', gap: 12 } }, byHeat(proposals).map((p) =>
-    h(ProposalCard, { key: p.id, proposal: p, before: images[p.id]?.before, onDecide,
-      outcomes: outcomes && outcomes.filter((o) => o.card_id === p.id), onLink, dispatch: dispatches.find((d) => d.card_id === p.id) })))
+const empty = (icon, key) => h(UI.EmptyState, { icon: h(icon, { size: 28 }), title: t(key), subtitle: t('emptyHint') })
+const stack = (...c) => h('div', { className: 'flex flex-col gap-3' }, ...c)
+export function Board({ proposals, images = {}, onDecide, outcomes, onLink, dispatches = [], signals = [] }) {
+  if (!proposals.length) return empty(Inbox, 'noProposals')
+  return stack(byHeat(proposals).map((p) => h(ProposalCard, { key: p.id, proposal: p, before: images[p.id]?.before, onDecide, signals,
+    outcomes: outcomes && outcomes.filter((o) => o.card_id === p.id), onLink, dispatch: dispatches.find((d) => d.card_id === p.id) })))
 }
 
-const COLS = ['Pain', 'People', 'Mentions', 'Days', 'Source', 'Layer']
 export function Signals({ signals }) {
-  if (!signals.length) return h(EmptyState, { icon: null, title: 'No signals yet' })
-  const cell = { padding: '8px 10px', borderBottom: '1px solid var(--border)', textAlign: 'left', fontSize: 13 }
-  const td = (...c) => h('td', { style: cell }, ...c)
-  return h(Card, null, h('table', { style: { width: '100%', borderCollapse: 'collapse' } },
-    h('caption', { style: { ...label, textAlign: 'left' } }, 'Signals, hottest first'),
-    h('thead', null, h('tr', null, COLS.map((c) => h('th', { key: c, scope: 'col', style: { ...cell, ...muted } }, c)))),
-    h('tbody', null, signalsByHeat(signals).map((s) => h('tr', { key: s.id, 'data-testid': 'signal-row' },
-      td(h('a', { href: s.links[0], target: '_blank', rel: 'noreferrer', style: { color: 'var(--text)' } }, s.pain),
-        s.dedup_of ? h('div', { style: muted }, `Merged into ${s.dedup_of}`) : null),
-      td(s.mentions.people), td(s.mentions.count), td(s.mentions.window_days),
-      td(h('code', null, s.source)), td(h(Badge, { variant: s.layer === 'real' ? 'ok' : 'aim' }, s.layer)))))))
+  if (!signals.length) return empty(Radio, 'noSignals')
+  const cols = ['colPain', 'colPeople', 'colMentions', 'colDays', 'colSource', 'colLayer'].map((k) => t(k))
+  return h(UI.Card, null, h(Table, { caption: t('signalsCaption'), cols }, signalsByHeat(signals).map((s) => h('tr', { key: s.id, 'data-testid': 'signal-row' },
+    td(h('a', { href: s.links[0], target: '_blank', rel: 'noreferrer', className: 'text-text hover:underline' }, s.pain),
+      s.dedup_of ? h('div', { className: MUTED }, t('mergedInto', { id: s.dedup_of })) : null),
+    td(s.mentions.people), td(s.mentions.count), td(s.mentions.window_days),
+    td(h('code', null, s.source)), td(h(UI.Badge, { variant: s.layer === 'real' ? 'ok' : 'aim' }, word('layer', s.layer)))))))
 }
 
-const TABS = [['board', 'Board'], ['signals', 'Signals'], ['settings', 'Settings']]
+export const TABS = ['board', 'signals', 'rounds', 'prompts', 'settings']
 const why = (e) => String(e?.message || e)
-const clock = (t) => new Date(t * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+const clock = (s) => new Date(s * 1000).toLocaleTimeString(getLang(), { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
 /** One line for the GitHub job (it runs for minutes after a refresh). */
-export const jobText = (j) => (!j ? '' : j.running ? `GitHub: fetching since ${clock(j.started_at)}…`
-  : !j.finished_at ? 'GitHub: not fetched yet' : j.error ? `GitHub: failed at ${clock(j.finished_at)} (${j.error})`
-    : `GitHub: ${j.rows} rows at ${clock(j.finished_at)}`)
+export const jobText = (j) => (!j ? '' : j.running ? t('ghRunning', { at: clock(j.started_at) })
+  : !j.finished_at ? t('ghNever') : j.error ? t('ghFailed', { at: clock(j.finished_at), e: j.error }) : t('ghDone', { n: j.rows, at: clock(j.finished_at) }))
 /** One line for the latest post-merge regression run. */
-export const regressText = (r) => (!r ? 'Regression: no run yet' : `Regression @ ${r.sha.slice(0, 7)}: `
-  + `${r.counts.pass}/${r.counts.run} pass · ${r.regressions.length ? `${r.regressions.length} regression(s)` : 'no regressions'}`)
+export const regressText = (r) => (!r ? t('regNone') : t(r.regressions.length ? 'regBad' : 'regClean',
+  { sha: r.sha.slice(0, 7), pass: r.counts.pass, n: r.counts.run, bad: r.regressions.length }))
 /** One line for the PR scoring job. */
-export const scoreJobText = (s) => (!s ? '' : s.running ? `Scoring PRs since ${clock(s.started_at)}…`
-  : !s.finished_at ? '' : s.error ? `Scoring failed at ${clock(s.finished_at)} (${s.error})`
-    : `Scored at ${clock(s.finished_at)}: ${s.updated.length} PR(s) changed`)
+export const scoreJobText = (s) => (!s ? '' : s.running ? t('scoreRunning', { at: clock(s.started_at) })
+  : !s.finished_at ? '' : s.error ? t('scoreFailed', { at: clock(s.finished_at), e: s.error }) : t('scoreDone', { at: clock(s.finished_at), n: s.updated.length }))
 /** One line for the design-crew round (it runs for many minutes). */
-export const roundText = (r) => (!r ? '' : r.running ? `Round ${r.round}: running since ${clock(r.started_at)}…`
-  : !r.finished_at ? 'Round: not run yet' : r.error ? `Round ${r.round}: failed at ${clock(r.finished_at)} (${r.error})`
-    : [`Round ${r.round}: ${r.counts.proposals} proposals from ${r.counts.signals} signals at ${clock(r.finished_at)}`,
-      ...r.notes].join(' · '))
+export const roundText = (r) => (!r ? '' : r.running ? t('roundRunning', { n: r.round, at: clock(r.started_at) })
+  : !r.finished_at ? t('roundNever') : r.error ? t('roundFailed', { n: r.round, at: clock(r.finished_at), e: r.error })
+    : [t('roundDone', { n: r.round, p: r.counts.proposals, s: r.counts.signals, at: clock(r.finished_at) }), ...r.notes].join(' · '))
 /** Run round, two steps: the first click arms, the second confirms. */
 export function RunRound({ armed, running, onArm, onConfirm, onCancel }) {
-  if (running) return h(Btn, { type: 'button', disabled: true }, 'Round running…')
-  if (!armed) return h(Btn, { type: 'button', onClick: onArm, 'data-testid': 'round-arm' }, 'Run round')
-  return h('span', { style: { display: 'flex', gap: 8 } },
-    h(Btn, { type: 'button', primary: true, onClick: onConfirm, 'data-testid': 'round-confirm' }, 'Confirm: run round'),
-    h(Btn, { type: 'button', onClick: onCancel }, 'Cancel'))
+  if (running) return h(UI.Btn, { type: 'button', disabled: true }, t('roundBusy'))
+  if (!armed) return h(UI.Btn, { type: 'button', onClick: onArm, 'data-testid': 'round-arm' }, t('roundArm'))
+  return h('span', { className: 'flex gap-2' },
+    h(UI.Btn, { type: 'button', primary: true, onClick: onConfirm, 'data-testid': 'round-confirm' }, t('roundConfirm')),
+    h(UI.Btn, { type: 'button', onClick: onCancel }, t('cancel')))
 }
-/** The page body. `load` is the data source; `onDecide` saves a choice; `onRefresh` pulls
- *  signals; `onStatus` reads the GitHub job, polled while it runs. */
-export function HarnessRsi({ load, onDecide, onRefresh, onStatus, onSettings, onSaveSettings, onRegress, onRoundStatus, onRunRound,
-  onSchedule, onSaveSchedule, onOutcomes, onLink, onScore, onPromptChanges, onDecidePrompt, onDispatchConf, onSaveDispatch }) {
-  const [changes, setChanges] = useState([])
-  const loadChanges = useCallback(() => onPromptChanges?.().then(setChanges, () => {}), [onPromptChanges])
-  useEffect(() => { loadChanges() }, [loadChanges])
-  const decidePrompt = (id, decision) => onDecidePrompt(id, decision)
-    .then(() => { setNote(decision === 'do' ? 'Prompt change applied' : 'Saved'); loadChanges() }, (e) => setNote(`Not applied: ${why(e)}`))
-  const [out, setOut] = useState(null)
-  const loadOut = useCallback(() => onOutcomes?.().then(setOut, () => {}), [onOutcomes])
-  useEffect(() => { loadOut() }, [loadOut])
+
+/** Read once, then poll every 5 s while the value says it is running. */
+function usePolled(read, running, after) {
+  const [v, set] = useState(undefined)
+  useEffect(() => { read().then(set, () => set(null)) }, [read])
   useEffect(() => {
-    if (!out?.score?.running) return undefined
-    const t = setTimeout(loadOut, 5000)
-    return () => clearTimeout(t)
-  }, [out, loadOut])
-  const [[sched, schedNote], setSched] = useState([null, ''])
-  useEffect(() => { onSchedule?.().then((v) => setSched([v, '']), () => {}) }, [onSchedule])
-  const saveSched = () => onSaveSchedule(sched.schedule).then(() => onSchedule())
-    .then((v) => setSched([v, 'Saved']), (e) => setSched([sched, `Not saved: ${why(e)}`]))
-  const [[disp, dispNote], setDisp] = useState([null, ''])
-  useEffect(() => { onDispatchConf?.().then((v) => setDisp([v, '']), () => {}) }, [onDispatchConf])
-  const saveDisp = () => onSaveDispatch(disp).then((v) => setDisp([v, 'Saved']), (e) => setDisp([disp, `Not saved: ${why(e)}`]))
-  const [regress, setRegress] = useState(undefined)
-  useEffect(() => { onRegress?.().then(setRegress, () => {}) }, [onRegress])
-  const [[data, error], setState] = useState([null, ''])
+    if (!v || !running(v)) return undefined
+    const id = setTimeout(() => read().then((n) => { set(n); if (!running(n)) after?.() }, () => set({ ...v })), 5000)
+    return () => clearTimeout(id)
+  }, [v, read])
+  return [v, set]
+}
+const isRunning = (x) => !!x?.running, scoreRunning = (x) => !!x?.score?.running
+
+/** The page body over one data source (backendSource or demoSource). */
+export function HarnessRsi({ src, demo = false }) {
   const [tab, setTab] = useState('board')
   const [note, setNote] = useState('')
-  const reload = useCallback(() => load().then((d) => setState([d, '']), (e) => setState([null, why(e)])), [load])
+  const [[data, error], setState] = useState([null, ''])
+  const reload = useCallback(() => src.load().then((d) => setState([d, '']), (e) => setState([null, why(e)])), [src])
   useEffect(() => { reload() }, [reload])
-  const [job, setJob] = useState(null)
+  const [changes, setChanges] = usePolled(src.promptChanges, () => false)
+  const [out, setOut] = usePolled(src.outcomes, scoreRunning)
+  const [job, setJob] = usePolled(src.status, isRunning, reload)
+  const [round, setRound] = usePolled(src.round, isRunning, reload)
+  const [regress] = usePolled(src.regress, () => false)
+  const [armed, setArmed] = useState(false)
   const [[form, formNote], setForm] = useState([null, ''])
-  useEffect(() => { onSettings?.().then((v) => setForm([toForm(v), '']), (e) => setForm([null, why(e)])) }, [onSettings])
-  const save = () => onSaveSettings(form).then((v) => setForm([toForm(v), 'Saved']), (e) => setForm([form, `Not saved: ${why(e)}`]))
-  useEffect(() => { onStatus?.().then(setJob, () => {}) }, [onStatus])
-  useEffect(() => {
-    if (!job?.running || !onStatus) return undefined
-    const t = setTimeout(() => onStatus().then((j) => { setJob(j); if (!j.running) reload() }, () => setJob({ ...job })), 5000)
-    return () => clearTimeout(t)
-  }, [job, onStatus, reload])
-  const [[round, armed], setRound] = useState([null, false])
-  useEffect(() => { onRoundStatus?.().then((r) => setRound([r, false]), () => {}) }, [onRoundStatus])
-  useEffect(() => {
-    if (!round?.running || !onRoundStatus) return undefined
-    const t = setTimeout(() => onRoundStatus().then((r) => { setRound([r, false]); if (!r.running) reload() },
-      () => setRound([{ ...round }, false])), 5000)
-    return () => clearTimeout(t)
-  }, [round, onRoundStatus, reload])
-  const runRound = () => { setRound([round, false]); onRunRound().then((r) => setRound([r, false]), (e) => setNote(`Could not start the round: ${why(e)}`)) }
+  useEffect(() => { src.settings().then((v) => setForm([toForm(v), '']), (e) => setForm([null, why(e)])) }, [src])
+  const [[sched, schedNote], setSched] = useState([null, ''])
+  useEffect(() => { src.schedule().then((v) => setSched([v, '']), () => {}) }, [src])
+  const [[disp, dispNote], setDisp] = useState([null, ''])
+  useEffect(() => { src.dispatchConf().then((v) => setDisp([v, '']), () => {}) }, [src])
+  const failed = (key) => (e) => setNote(t(key, { e: why(e) })), notSaved = (e) => t('notSaved', { e: why(e) })
+  const save = () => src.saveSettings(form).then((v) => setForm([toForm(v), t('saved')]), (e) => setForm([form, notSaved(e)]))
+  const saveSched = () => src.saveSchedule(sched.schedule).then(() => src.schedule())
+    .then((v) => setSched([v, t('saved')]), (e) => setSched([sched, notSaved(e)]))
+  const saveDisp = () => src.saveDispatch(disp).then((v) => setDisp([v, t('saved')]), (e) => setDisp([disp, notSaved(e)]))
   // The card shows the choice at once; the reload then shows what decisions.jsonl holds.
   const decide = (id, decision) => {
     setState(([d]) => [{ ...d, proposals: applyDecision(d.proposals, id, decision) }, ''])
-    const said = DECISIONS.find((x) => x[0] === decision)[1]
-    Promise.resolve(onDecide?.(id, decision)).then(() => { setNote(`Saved: ${said}`); reload(); loadOut() },
-      (e) => { setNote(`Could not save the decision: ${why(e)}`); reload() })
+    Promise.resolve(src.decide(id, decision)).then(() => { setNote(t('savedDecision', { d: t(`dec_${decision}`) })); reload(); src.outcomes().then(setOut, () => {}) },
+      (e) => { failed('decideFailed')(e); reload() })
   }
-  const failed = (what) => (e) => setNote(`Could not ${what}: ${why(e)}`)
-  const linkPr = (id, n) => onLink(id, n).then(loadOut, failed('link the PR'))
-  const score = () => onScore().then(setOut, failed('start scoring'))
+  const decidePrompt = (id, decision) => src.decidePrompt(id, decision)
+    .then(() => { setNote(t(decision === 'do' ? 'pcDone' : 'saved')); src.promptChanges().then(setChanges, () => {}) }, failed('pcFailed'))
+  const linkPr = (id, n) => src.link(id, n).then(() => src.outcomes().then(setOut), failed('linkFailed'))
+  const score = () => src.score().then(setOut, failed('scoreStartFailed'))
+  const runRound = () => { setArmed(false); src.runRound().then(setRound, failed('roundStartFailed')) }
   const refresh = () => {
-    setNote('Refreshing signals…')
-    onRefresh().then((r) => { setNote([`Signals: ${r.total} (${r.added} new)`, ...r.errors].join(' · ')); setJob(r.github || null); reload() },
-      (e) => setNote(`Could not refresh: ${why(e)}`))
+    setNote(t('refreshing'))
+    src.refresh().then((r) => { setNote([t('refreshed', { total: r.total, added: r.added }), ...r.errors].join(' · ')); setJob(r.github || null); reload() },
+      failed('refreshFailed'))
   }
-  const tabStyle = (on) => ({ padding: '6px 12px', borderRadius: 8, border: 0, cursor: 'pointer', fontSize: 14,
-    background: on ? 'var(--bg-hover)' : 'transparent', color: on ? 'var(--text-strong)' : MUTED })
-  const body = error ? h('div', { role: 'alert', style: { color: 'var(--danger)' } }, `Could not load data: ${error}`)
-    : !data ? h('div', { style: muted }, 'Loading…')
-      : tab === 'settings' ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: 12 } },
-        form ? h(SettingsForm, { form, note: formNote, onSave: save, onChange: (f) => setForm([f, '']) })
-          : h('div', { style: muted }, formNote || 'Loading…'),
-        sched ? h(ScheduleForm, { conf: sched.schedule, note: schedNote, onSave: saveSched,
-          onChange: (c) => setSched([{ ...sched, schedule: c }, '']) }) : null,
-        disp ? h(DispatchForm, { conf: disp, note: dispNote, onSave: saveDisp, onChange: (c) => setDisp([c, '']) }) : null)
-      : tab === 'board' ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: 12 } },
-        sched ? h(Runs, { runs: sched.runs }) : null,
-        changes.map((c) => h(PromptChangeCard, { key: c.id, change: c, onDecide: decidePrompt })), h(Board, { proposals: data.proposals, images: data.images, onDecide: decide,
-          outcomes: out?.outcomes, onLink: onLink && linkPr, dispatches: out?.dispatches }))
-        : h(Signals, { signals: data.signals })
-  return h('div', { style: { flex: 1, overflowY: 'auto' } },
-    h(PageHeader, { title: 'Harness RSI', subtitle: 'Pick what to build next. Nothing runs until you decide.' }),
-    h('div', { style: { padding: '0 24px 24px', display: 'flex', flexDirection: 'column', gap: 12, maxWidth: 960 } },
-      h('div', { style: { display: 'flex', gap: 4, alignItems: 'center', flexWrap: 'wrap' } },
-        h('div', { role: 'tablist', 'aria-label': 'Harness RSI sections', style: { display: 'flex', gap: 4 } },
-          TABS.map(([id, text]) => h('button', { key: id, type: 'button', role: 'tab', id: `tab-${id}`,
-            'aria-selected': tab === id, 'aria-controls': 'rsi-panel', onClick: () => setTab(id), style: tabStyle(tab === id) },
-          text))),
-        h('span', { style: { marginLeft: 'auto', display: 'flex', gap: 8 } },
-          onRunRound ? h(RunRound, { armed, running: round?.running, onArm: () => setRound([round, true]),
-            onConfirm: runRound, onCancel: () => setRound([round, false]) }) : null,
-          onScore ? h(Btn, { type: 'button', onClick: score, disabled: !!out?.score?.running }, 'Score PRs') : null,
-          onRefresh ? h(Btn, { type: 'button', onClick: refresh }, 'Refresh signals') : null)),
-      h('div', { style: muted, 'aria-live': 'polite', 'data-testid': 'note' }, note),
-      h('div', { style: muted, 'aria-live': 'polite', 'data-testid': 'github-job' }, jobText(job)),
-      h('div', { style: muted, 'aria-live': 'polite', 'data-testid': 'round-job' }, roundText(round)),
-      h('div', { style: muted, 'aria-live': 'polite', 'data-testid': 'score-job' }, scoreJobText(out?.score)),
-      regress !== undefined ? h('div', { style: muted, 'data-testid': 'regress' }, regressText(regress)) : null,
-      form && !form.saved.command_set ? h('div', { style: muted, 'data-testid': 'slack-off' }, slackNote(null)) : null,
-      h('div', { role: 'tabpanel', id: 'rsi-panel', 'aria-labelledby': `tab-${tab}` }, body)))
+
+  const toolbar = (...c) => h('div', { className: 'flex flex-wrap items-center gap-2 mb-3' }, ...c)
+  const lines = (...xs) => xs.filter(Boolean).map((x, i) => h('div', { key: i, className: MUTED }, x))
+  const pending = (data?.proposals || []).filter((p) => !p.decision).length
+  const panels = {
+    board: () => [toolbar(h(UI.Btn, { type: 'button', onClick: score, disabled: scoreRunning(out) }, t('scorePrs')), h('span', { className: MUTED, 'data-testid': 'score-job' }, scoreJobText(out?.score))),
+      h(Board, { proposals: data.proposals, images: data.images, signals: data.signals, onDecide: decide, outcomes: out?.outcomes, onLink: linkPr, dispatches: out?.dispatches })],
+    signals: () => [toolbar(h(UI.Btn, { type: 'button', onClick: refresh }, t('refresh')), h('span', { className: MUTED, 'data-testid': 'github-job' }, jobText(job))),
+      form && !form.saved.command_set ? h('div', { key: 's', className: `${MUTED} mb-3`, 'data-testid': 'slack-off' }, slackNote(null)) : null,
+      h(Signals, { signals: data.signals })],
+    rounds: () => [toolbar(h(RunRound, { armed, running: isRunning(round), onArm: () => setArmed(true), onConfirm: runRound, onCancel: () => setArmed(false) })),
+      h(UI.Card, { key: 'jobs' }, h('div', { className: LABEL }, t('jobsTitle')),
+        h('div', { 'data-testid': 'round-job' }, lines(roundText(round) || t('roundNever'))), h('div', { 'data-testid': 'regress' }, lines(regressText(regress))),
+        lines(jobText(job), scoreJobText(out?.score))),
+      h(UI.Card, { key: 'runs' }, h(Runs, { runs: sched?.runs || [] }))],
+    prompts: () => [(changes || []).length ? changes.map((c) => h(PromptChangeCard, { key: c.id, change: c, onDecide: decidePrompt })) : empty(Wand2, 'noPromptChanges')],
+    settings: () => [form ? h(SettingsForm, { key: 'f', form, note: formNote, onSave: save, onChange: (f) => setForm([f, '']) }) : lines(formNote),
+      sched ? h(ScheduleForm, { key: 's', conf: sched.schedule, note: schedNote, onSave: saveSched, onChange: (c) => setSched([{ ...sched, schedule: c }, '']) }) : null,
+      disp ? h(DispatchForm, { key: 'd', conf: disp, note: dispNote, onSave: saveDisp, onChange: (c) => setDisp([c, '']) }) : null],
+  }
+  const body = error ? h(UI.ErrorNotice, { title: t('loadFailed'), message: error, testId: 'load-error' })
+    : !data ? h(UI.ContentSkeleton, { rows: 4 }) : stack(...panels[tab]())
+  const counts = { board: data?.proposals.length, signals: data?.signals.length, prompts: changes?.length }
+  return h('div', { className: 'flex-1 min-w-0 flex flex-col min-h-0', lang: getLang() },
+    h(UI.PageHeader, { title: t('title'), subtitle: t('subtitle') }),
+    h('div', { className: 'flex-1 overflow-y-auto px-4 md:px-6 pb-8 min-h-0' }, h('div', { className: 'max-w-4xl flex flex-col gap-3' },
+      demo ? h('div', { role: 'note', 'data-testid': 'demo-note', className: 'rounded-md border border-border bg-bg-elevated px-3 py-2.5 text-[12.5px] text-muted' }, t('demoNote')) : null,
+      h('div', { className: 'grid grid-cols-2 sm:grid-cols-4 gap-3' },
+        h(UI.StatCard, { label: t('statProposals'), value: data ? data.proposals.length : '—', accent: true }),
+        h(UI.StatCard, { label: t('statPending'), value: data ? pending : '—' }),
+        h(UI.StatCard, { label: t('statSignals'), value: data ? data.signals.length : '—' }),
+        h(UI.StatCard, { label: t('statPrompts'), value: changes ? changes.length : '—' })),
+      h(UI.SegmentedControl, { ariaLabel: t('tabsAria'), value: tab, onChange: setTab, wrap: true,
+        segments: TABS.map((k) => ({ key: k, label: t(`tab_${k}`), ...(counts[k] != null ? { count: counts[k] } : {}) })) }),
+      h('div', { className: MUTED, 'aria-live': 'polite', 'data-testid': 'note' }, note),
+      h('div', { role: 'region', 'aria-label': t(`tab_${tab}`), 'data-testid': `panel-${tab}` }, body))))
 }
 
-/** The installed page: the backend is the data source. */
+/** The installed page: the backend is the data source, or the fixtures with `?demo=1`. */
 export default function HarnessRsiPage() {
-  const api = useAppApi()
-  const src = useMemo(() => backendSource(api), [api])
-  return h(HarnessRsi, { load: src.load, onDecide: src.decide, onRefresh: src.refresh, onStatus: src.status,
-    onSettings: src.settings, onSaveSettings: src.saveSettings, onRegress: src.regress,
-    onRoundStatus: src.round, onRunRound: src.runRound, onSchedule: src.schedule, onSaveSchedule: src.saveSchedule,
-    onOutcomes: src.outcomes, onLink: src.link, onScore: src.score, onPromptChanges: src.promptChanges, onDecidePrompt: src.decidePrompt,
-    onDispatchConf: src.dispatchConf, onSaveDispatch: src.saveDispatch })
+  sdk.useLanguageGeneration?.()
+  setLang(pickLang(sdk.activeLocale?.()))
+  const api = sdk.useAppApi()
+  const demo = isDemo(globalThis.location?.search)
+  const src = useMemo(() => (demo ? demoSource() : backendSource(api)), [api, demo])
+  return h(HarnessRsi, { src, demo })
 }

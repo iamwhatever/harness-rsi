@@ -1,0 +1,109 @@
+// Every word the page shows, in English and Chinese. Data values (pains, sources, ids, error text from
+// the backend) never pass through here. `{name}` is filled from t()'s second argument.
+const en = {
+  title: 'Harness RSI', subtitle: 'Pick what to build next. Nothing runs until you decide.',
+  demoNote: 'Demo mode: sample data from the fixtures. Nothing is saved. Remove ?demo=1 from the address to see your data.',
+  tabsAria: 'Harness RSI sections', tab_board: 'Board', tab_signals: 'Signals', tab_rounds: 'Rounds', tab_prompts: 'Prompt changes', tab_settings: 'Settings',
+  statProposals: 'Proposals', statPending: 'Waiting for you', statSignals: 'Signals', statPrompts: 'Prompt changes',
+  loadFailed: 'Could not load data', emptyHint: 'Run a round, or open this page with ?demo=1 to preview sample data.',
+  noProposals: 'No proposals yet', noSignals: 'No signals yet', noPromptChanges: 'No prompt changes yet', noRuns: 'No scheduled runs yet',
+  heat: '{people} people / {days} days', noSources: 'No sources', before: 'Before', after: 'After (mock)',
+  beforeAlt: 'Current page for: {pain}', noShot: 'No screenshot yet', openMock: 'Open mock: {slug}', noMock: 'No mock yet',
+  secCost: 'Cost', cost: '{files} files · {lines} lines', risks: 'Risks: {r}', noRisks: 'No known risks',
+  secPrior: 'Prior art', noPrior: 'None found', secExams: 'Exams', secPr: 'Product PR', noPr: 'No PR linked',
+  prPlaceholder: 'KiroCrew PR #', prAria: 'KiroCrew PR number for: {pain}', linkPr: 'Link PR',
+  scoreJudge: 'Judge: base {base} → head {head}', scoreNot: 'Not scored: {note}', scoreYet: 'Not scored yet',
+  judge_pass: 'pass', judge_fail: 'fail', state_merged: 'merged', state_open: 'open', state_closed: 'closed',
+  regressNotRun: 'Regress: not run yet', regressLine: 'Regress @ {sha}: {pass}/{n} pass', regressLineBad: 'Regress @ {sha}: {pass}/{n} pass · {bad} regression(s)',
+  dec_do: 'Do', dec_skip: 'Skip', dec_later: 'Later', decided: 'Decided: {d}', undecided: 'Not decided', decAria: 'Decision for: {pain}',
+  savedDecision: 'Saved: {d}', decideFailed: 'Could not save the decision: {e}',
+  dispFailed: 'Dispatch failed: {e}', dispOpening: 'Opening a worker chat…', dispChat: 'Worker chat: {s}',
+  pcLabel: 'Prompt change', abCaption: 'A/B on rounds {rounds}, {reps} runs each', colMetric: 'Metric', colA: 'A (now)', colB: 'B (change)', colVerdict: 'Verdict',
+  verdict_better: 'better', verdict_same: 'same', verdict_worse: 'worse', noAb: 'No A/B run yet', showDiff: 'Show the diff',
+  pcApplied: 'Applied: {agent} now runs {to}', pcAria: 'Decision for prompt change {id}', pcDone: 'Prompt change applied', pcFailed: 'Not applied: {e}',
+  signalsCaption: 'Signals, hottest first', colPain: 'Pain', colPeople: 'People', colMentions: 'Mentions', colDays: 'Days', colSource: 'Source', colLayer: 'Layer',
+  layer_real: 'real', layer_external: 'external', mergedInto: 'Merged into {id}',
+  refresh: 'Refresh signals', refreshing: 'Refreshing signals…', refreshed: 'Signals: {total} ({added} new)', refreshFailed: 'Could not refresh: {e}',
+  ghRunning: 'GitHub: fetching since {at}…', ghNever: 'GitHub: not fetched yet', ghFailed: 'GitHub: failed at {at} ({e})', ghDone: 'GitHub: {n} rows at {at}',
+  scorePrs: 'Score PRs', scoreRunning: 'Scoring PRs since {at}…', scoreFailed: 'Scoring failed at {at} ({e})', scoreDone: 'Scored at {at}: {n} PR(s) changed',
+  scoreStartFailed: 'Could not start scoring: {e}', linkFailed: 'Could not link the PR: {e}',
+  jobsTitle: 'Jobs', roundArm: 'Run round', roundConfirm: 'Confirm: run round', roundBusy: 'Round running…', cancel: 'Cancel',
+  roundRunning: 'Round {n}: running since {at}…', roundNever: 'Round: not run yet', roundFailed: 'Round {n}: failed at {at} ({e})',
+  roundDone: 'Round {n}: {p} proposals from {s} signals at {at}', roundStartFailed: 'Could not start the round: {e}',
+  regNone: 'Regression: no run yet', regClean: 'Regression @ {sha}: {pass}/{n} pass · no regressions', regBad: 'Regression @ {sha}: {pass}/{n} pass · {bad} regression(s)',
+  runsTitle: 'Last scheduled runs', colJob: 'Job', colStarted: 'Started', colEnded: 'Ended', colResult: 'Result', jobRound: 'Weekly round', jobRegress: 'Daily regression',
+  runFailed: 'Failed: {e}', runCards: '{cards} cards from {signals} signals', runClean: 'No regressions at {sha}', runRegress: '{n} regression(s) at {sha}',
+  save: 'Save', saved: 'Saved', notSaved: 'Not saved: {e}',
+  slackTitle: 'Slack', slackSetYes: 'Slack MCP command configured: yes', slackSetNo: 'Slack MCP command configured: no',
+  slackOn: 'Slack: on, reading {n} channel(s) over {days} days', slackOff: 'Slack collection is off: set the Slack MCP command to turn it on.',
+  field_command: 'Slack MCP command (blank keeps the saved one)', field_args: 'Arguments', field_channels: 'Channel ids', field_window_days: 'Window (days)', field_workspace_url: 'Workspace URL (for links)',
+  schedTitle: 'Schedule', schedIntro: 'Off until you switch a job on and save. Each run ends in one notification; nothing posts to Slack, opens a PR or merges.',
+  sched_round_enabled: 'Run a design-crew round once a week', sched_regress_enabled: 'Check the regression exams once a day after new merges',
+  sched_score_enabled: 'Score linked KiroCrew PRs with the judge every hour (never runs fork PRs)',
+  schedDay: 'Day', schedHour: 'Hour (0-23, local)', schedDir: 'KiroCrew clone for the regression check (absolute path)',
+  days: 'Monday,Tuesday,Wednesday,Thursday,Friday,Saturday,Sunday',
+  dispTitle: 'Auto-dispatch', dispToggle: 'Open a worker chat when I press Do',
+  dispIntro: 'Off until you switch it on and save. When on, Do on a proposal card opens one worker chat that builds it as one small PR, CI green, never merged. Prompt-change cards never dispatch.',
+  dispRepos: 'Target repos (allowlist)', dispCap: 'Dispatches a day (1-10)',
+}
+
+const zh = {
+  title: 'Harness 自我改进', subtitle: '选出下一步要做的事。你决定之前，什么都不会运行。',
+  demoNote: '演示模式：显示示例数据，不会保存任何内容。去掉地址里的 ?demo=1 即可看到你的数据。',
+  tabsAria: 'Harness 自我改进的分区', tab_board: '看板', tab_signals: '信号', tab_rounds: '轮次', tab_prompts: '提示词改动', tab_settings: '设置',
+  statProposals: '提案', statPending: '等你决定', statSignals: '信号', statPrompts: '提示词改动',
+  loadFailed: '无法加载数据', emptyHint: '运行一轮，或用 ?demo=1 打开本页预览示例数据。',
+  noProposals: '还没有提案', noSignals: '还没有信号', noPromptChanges: '还没有提示词改动', noRuns: '还没有定时运行记录',
+  heat: '{people} 人 / {days} 天', noSources: '没有来源', before: '现在', after: '改后（草图）',
+  beforeAlt: '当前页面：{pain}', noShot: '还没有截图', openMock: '打开草图：{slug}', noMock: '还没有草图',
+  secCost: '成本', cost: '{files} 个文件 · {lines} 行', risks: '风险：{r}', noRisks: '没有已知风险',
+  secPrior: '已有工作', noPrior: '没有找到', secExams: '考题', secPr: '产品 PR', noPr: '还没有关联 PR',
+  prPlaceholder: 'KiroCrew PR 编号', prAria: '关联到「{pain}」的 KiroCrew PR 编号', linkPr: '关联 PR',
+  scoreJudge: '评分：基线 {base} → 新版 {head}', scoreNot: '未评分：{note}', scoreYet: '还没有评分',
+  judge_pass: '通过', judge_fail: '未通过', state_merged: '已合并', state_open: '进行中', state_closed: '已关闭',
+  regressNotRun: '回归：还没运行', regressLine: '回归 @ {sha}：{pass}/{n} 通过', regressLineBad: '回归 @ {sha}：{pass}/{n} 通过 · {bad} 个回归',
+  dec_do: '做', dec_skip: '不做', dec_later: '以后再说', decided: '已决定：{d}', undecided: '未决定', decAria: '「{pain}」的决定',
+  savedDecision: '已保存：{d}', decideFailed: '决定没有保存：{e}',
+  dispFailed: '派发失败：{e}', dispOpening: '正在打开工作对话…', dispChat: '工作对话：{s}',
+  pcLabel: '提示词改动', abCaption: '在第 {rounds} 轮上做 A/B，每轮 {reps} 次', colMetric: '指标', colA: 'A（现在）', colB: 'B（改动）', colVerdict: '结论',
+  verdict_better: '更好', verdict_same: '持平', verdict_worse: '更差', noAb: '还没有 A/B 结果', showDiff: '查看改动',
+  pcApplied: '已应用：{agent} 现在使用 {to}', pcAria: '提示词改动 {id} 的决定', pcDone: '提示词改动已应用', pcFailed: '没有应用：{e}',
+  signalsCaption: '信号，按热度排序', colPain: '痛点', colPeople: '人数', colMentions: '提及', colDays: '天数', colSource: '来源', colLayer: '类别',
+  layer_real: '真实', layer_external: '外部', mergedInto: '已合并到 {id}',
+  refresh: '刷新信号', refreshing: '正在刷新信号…', refreshed: '信号：{total} 条（新增 {added}）', refreshFailed: '无法刷新：{e}',
+  ghRunning: 'GitHub：{at} 起正在获取…', ghNever: 'GitHub：还没获取', ghFailed: 'GitHub：{at} 失败（{e}）', ghDone: 'GitHub：{at} 获取 {n} 条',
+  scorePrs: '给 PR 评分', scoreRunning: '{at} 起正在评分…', scoreFailed: '评分在 {at} 失败（{e}）', scoreDone: '{at} 完成评分：{n} 个 PR 有变化',
+  scoreStartFailed: '无法开始评分：{e}', linkFailed: '无法关联 PR：{e}',
+  jobsTitle: '任务', roundArm: '运行一轮', roundConfirm: '确认：运行一轮', roundBusy: '正在运行…', cancel: '取消',
+  roundRunning: '第 {n} 轮：{at} 起运行中…', roundNever: '轮次：还没运行', roundFailed: '第 {n} 轮：{at} 失败（{e}）',
+  roundDone: '第 {n} 轮：{at} 从 {s} 条信号得到 {p} 个提案', roundStartFailed: '无法开始这一轮：{e}',
+  regNone: '回归：还没运行', regClean: '回归 @ {sha}：{pass}/{n} 通过 · 没有回归', regBad: '回归 @ {sha}：{pass}/{n} 通过 · {bad} 个回归',
+  runsTitle: '最近的定时运行', colJob: '任务', colStarted: '开始', colEnded: '结束', colResult: '结果', jobRound: '每周一轮', jobRegress: '每日回归',
+  runFailed: '失败：{e}', runCards: '从 {signals} 条信号得到 {cards} 张卡片', runClean: '{sha} 没有回归', runRegress: '{sha} 有 {n} 个回归',
+  save: '保存', saved: '已保存', notSaved: '没有保存：{e}',
+  slackTitle: 'Slack', slackSetYes: '已设置 Slack MCP 命令：是', slackSetNo: '已设置 Slack MCP 命令：否',
+  slackOn: 'Slack：已开启，读取 {n} 个频道最近 {days} 天', slackOff: 'Slack 收集已关闭：设置 Slack MCP 命令即可开启。',
+  field_command: 'Slack MCP 命令（留空则保留已保存的）', field_args: '参数', field_channels: '频道 ID', field_window_days: '时间窗口（天）', field_workspace_url: '工作区地址（用于链接）',
+  schedTitle: '定时', schedIntro: '打开某项并保存之前都不会运行。每次运行只发一条通知；不会发 Slack、开 PR 或合并。',
+  sched_round_enabled: '每周运行一轮设计组', sched_regress_enabled: '有新合并后，每天检查一次回归考题',
+  sched_score_enabled: '每小时用评分器给关联的 KiroCrew PR 评分（从不运行 fork 的 PR）',
+  schedDay: '星期', schedHour: '小时（0-23，本地时间）', schedDir: '用于回归检查的 KiroCrew 目录（绝对路径）',
+  days: '星期一,星期二,星期三,星期四,星期五,星期六,星期日',
+  dispTitle: '自动派发', dispToggle: '按「做」时打开一个工作对话',
+  dispIntro: '打开并保存之前都不会运行。打开后，在提案卡片上按「做」会打开一个工作对话，把它做成一个小 PR，CI 通过，从不合并。提示词改动卡片从不派发。',
+  dispRepos: '目标仓库（允许列表）', dispCap: '每天派发上限（1-10）',
+}
+
+export const TABLE = { en, zh }
+let lang = 'en'
+/** zh for any Chinese host locale, else en. */
+export const pickLang = (locale) => (String(locale || '').toLowerCase().startsWith('zh') ? 'zh' : 'en')
+export const setLang = (l) => { lang = TABLE[l] ? l : 'en' }
+export const getLang = () => lang
+export const has = (key) => key in en
+/** The string for `key` in the page's language; a key missing from the table is a bug, so it throws. */
+export function t(key, vars = {}) {
+  const s = TABLE[lang][key]
+  if (s == null) throw new Error(`no string for ${key}`)
+  return s.replace(/\{(\w+)\}/g, (_, k) => String(vars[k] ?? ''))
+}

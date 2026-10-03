@@ -1,4 +1,4 @@
-// Run by test_ui.py beside fake `react` / `@kirocrew/app-sdk/ui` (elements are plain objects).
+// Run by test_ui.py beside the fakes in tests/ui/fakes (elements are plain objects).
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import * as ui from './ui/index.mjs'
@@ -50,7 +50,7 @@ assert.equal(text(find(panelOn, (n) => n.props['data-testid'] === 'slack-configu
 assert.ok(!JSON.stringify(ui.toForm(saved)).includes('slack-mcp'))
 const inputs = find(panel, (n) => n.type === 'input')
 assert.deepEqual(inputs.map((n) => n.props.name), ['command', 'args', 'channels', 'window_days', 'workspace_url'])
-inputs[0].props.onChange({ target: { value: 'slack-mcp' } })
+inputs[0].props.onChange('slack-mcp')
 find(panel, (n) => n.type === 'button')[0].props.onClick()
 assert.deepEqual(changed, [{ ...form, command: 'slack-mcp' }, 'save'])
 assert.deepEqual(await ui.backendSource(api(true)).status(), { running: true })
@@ -100,18 +100,18 @@ const edits = []
 const sform = expand(ui.ScheduleForm({ conf: sched.schedule, note: '', onSave: () => edits.push('save'), onChange: (c) => edits.push(c) }))
 const named = (n) => find(sform, (x) => x.props.name === n)[0]
 assert.deepEqual(find(sform, (x) => x.type === 'input' && x.props.type === 'checkbox').map((x) => [x.props.name, x.props.checked]),
-  [['round_enabled', false], ['regress_enabled', false], ['score_enabled', undefined]])
-assert.deepEqual(find([named('weekday')], (x) => x.type === 'option').map(text), ui.DAYS)
-assert.equal(named('weekday').props.value, 0)
-named('round_enabled').props.onChange({ target: { type: 'checkbox', checked: true } })
-named('weekday').props.onChange({ target: { value: '3' } })
-named('hour').props.onChange({ target: { value: '7' } })
-named('kirocrew_dir').props.onChange({ target: { value: '/kc' } })
+  [['round_enabled', false], ['regress_enabled', false], ['score_enabled', false]])
+assert.deepEqual(find([named('weekday')], (x) => x.type === 'option').map(text), ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'])
+assert.equal(named('weekday').props.value, '0')
+named('round_enabled').props.onChange(true)
+named('weekday').props.onChange('3')
+named('hour').props.onChange('7')
+named('kirocrew_dir').props.onChange('/kc')
 find(sform, (x) => x.type === 'button')[0].props.onClick()
 assert.deepEqual(edits, [{ ...sched.schedule, round_enabled: true }, { ...sched.schedule, weekday: 3 }, { ...sched.schedule, hour: 7 },
   { ...sched.schedule, kirocrew_dir: '/kc' }, 'save'])
 assert.match(text(sform[0]), /nothing posts to Slack, opens a PR or merges/)
-assert.equal(text(find(expand(ui.Runs({ runs: [] })), (x) => x.type === 'td')[0]), 'No scheduled runs yet')
+assert.equal(text(expand(ui.Runs({ runs: [] }))[0]), 'No scheduled runs yet')
 const runs = [{ kind: 'regress', start: '2026-10-05T09:05:00+00:00', end: '2026-10-05T09:40:00+00:00', sha: 'f00dfeed1234', regressions: 2, error: '' },
   { kind: 'round', start: '2026-10-05T09:05:00+00:00', end: '2026-10-05T10:05:00+00:00', signals: 12, cards: 3, error: '' }]
 const runRows = find(expand(ui.Runs({ runs })), (x) => x.props['data-testid'] === 'run-row')
@@ -131,7 +131,7 @@ for (const p of proposals) {
   for (const w of want) assert.ok(t.includes(w), `${p.id}: ${w}`)
   assert.equal(text(find([card], (n) => n.props.id === card.props['aria-labelledby'])[0]), p.pain)
   const buttons = find([card], (n) => n.type === 'button')
-  assert.deepEqual(buttons.map(text), ['做', '不做', '以后再说'])
+  assert.deepEqual(buttons.map(text), ['Do', 'Skip', 'Later'])
   for (const b of buttons) {
     assert.equal(b.props.type, 'button')
     assert.equal(b.props['aria-pressed'], p.decision === b.props['data-decision'])
@@ -184,7 +184,7 @@ assert.ok(text(find(scored, (n) => n.props['data-id'] === 'prop_plain_errors')[0
 assert.equal(ui.scoreJobText(null), '')
 assert.match(ui.scoreJobText({ running: true, started_at: 1 }), /^Scoring PRs since /)
 assert.match(ui.scoreJobText({ running: false, started_at: 1, finished_at: 2, updated: [{}], error: '' }), /: 1 PR\(s\) changed$/)
-// Prompt change: the card shows A vs B per metric and the diff; 做 sends the decision; an applied card has no buttons.
+// Prompt change: the card shows A vs B per metric and the diff; Do sends the decision; an applied card has no buttons.
 const { promptChange: pc } = await import('./ui/fake-data.mjs')
 const papi = { get: async (p) => { assert.equal(p, '/api/apps/harness-rsi/prompt-changes'); return { changes: [pc] } },
   post: async (p, b) => { assert.equal(p, '/api/apps/harness-rsi/prompt-changes/decide'); return { change: { ...pc, status: 'applied', b } } } }
@@ -211,9 +211,9 @@ const dedits = []
 const dform = expand(ui.DispatchForm({ conf: dconf, note: '', onSave: () => dedits.push('save'), onChange: (c) => dedits.push(c) }))
 const dbox = find(dform, (n) => n.props?.name === 'auto_dispatch')[0]
 assert.equal(dbox.props.checked, false)
-dbox.props.onChange({ target: { checked: true } })
-find(dform, (n) => n.props?.name === 'repos')[0].props.onChange({ target: { value: 'a/b, c/d' } })
-find(dform, (n) => n.props?.name === 'daily_cap')[0].props.onChange({ target: { value: '3' } })
+dbox.props.onChange(true)
+find(dform, (n) => n.props?.name === 'repos')[0].props.onChange('a/b, c/d')
+find(dform, (n) => n.props?.name === 'daily_cap')[0].props.onChange('3')
 find(dform, (n) => n.type === 'button')[0].props.onClick()
 assert.deepEqual(dedits, [{ ...dconf, auto_dispatch: true }, { ...dconf, repos: ['a/b', 'c/d'] }, { ...dconf, daily_cap: 3 }, 'save'])
 const sentRow = { card_id: 'prop_bg_tasks', state: 'dispatched', session: 'rsi-bg-tasks-1', error: '' }

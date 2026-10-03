@@ -6,18 +6,10 @@ import subprocess
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-# Fake host modules for board_check.mjs: elements become plain objects.
-FAKES = {
-    ("react", "."): "export const createElement = (type, props, ...c) => ({ type, key: props?.key,"
-    " props: { ...(props || {}), children: c.length === 1 ? c[0] : c } })\n"
-    "export const useState = (v) => [v, () => {}]\nexport const useEffect = () => {}\n"
-    "export const useCallback = (f) => f, useMemo = (f) => f()\n",
-    ("@kirocrew/app-sdk", "."): "export const useAppApi = () => null\n",
-    ("@kirocrew/app-sdk", "./ui"): "import { createElement as h } from 'react'\n"
-    "const pass = (tag) => ({ children, primary, variant, ...rest }) => h(tag, rest, children)\n"
-    "export const Card = pass('div'), Btn = pass('button'), Badge = pass('span')\n"
-    "export const PageHeader = ({ title }) => h('div', null, title), EmptyState = PageHeader\n",
-}
+HERE = Path(__file__).resolve().parent
+# Fake host modules for the node checks (tests/ui/fakes): elements become plain objects.
+FAKES = {("react", "."): "react.mjs", ("@kirocrew/app-sdk", "."): "app-sdk.mjs",
+         ("@kirocrew/app-sdk", "./ui"): "app-sdk-ui.mjs", ("lucide-react", "."): "lucide-react.mjs"}
 
 
 def load(name):
@@ -48,18 +40,35 @@ def test_fake_data_is_a_copy_of_the_fixtures():
         assert json.loads(line.split(" = ", 1)[1]) == load(f"fixtures/{name}.json")
 
 
-def test_board_renders_every_proposal_and_writes_decisions(tmp_path):
+def run_check(tmp_path, script):
+    """Run tests/ui/SCRIPT in node beside the fake host modules, a copy of ui/ and the fixtures."""
     node = shutil.which("node")
     assert node, "node is required (it ships on the CI runner)"
-    for (name, sub), body in FAKES.items():
+    for (name, sub), fake in FAKES.items():
         pkg = tmp_path / "node_modules" / name
         pkg.mkdir(parents=True, exist_ok=True)
         file = "index.mjs" if sub == "." else f"{sub[2:]}.mjs"
-        (pkg / file).write_text(body, encoding="utf-8")
+        shutil.copy(HERE / "fakes" / fake, pkg / file)
         exports = {s: ("./index.mjs" if s == "." else f"./{s[2:]}.mjs") for (n, s) in FAKES if n == name}
         (pkg / "package.json").write_text(json.dumps({"type": "module", "exports": exports}))
-    shutil.copytree(ROOT / "ui", tmp_path / "ui", ignore=shutil.ignore_patterns("screenshots"))
-    shutil.copytree(ROOT / "fixtures", tmp_path / "fixtures")
-    shutil.copy(Path(__file__).with_name("board_check.mjs"), tmp_path)
-    r = subprocess.run([node, "board_check.mjs"], cwd=tmp_path, capture_output=True, text=True, timeout=60)
+    if not (tmp_path / "ui").exists():
+        shutil.copytree(ROOT / "ui", tmp_path / "ui", ignore=shutil.ignore_patterns("screenshots"))
+        shutil.copytree(ROOT / "fixtures", tmp_path / "fixtures")
+    shutil.copy(HERE / script, tmp_path)
+    return subprocess.run([node, script], cwd=tmp_path, capture_output=True, text=True, timeout=60)
+
+
+def test_board_renders_every_proposal_and_writes_decisions(tmp_path):
+    r = run_check(tmp_path, "board_check.mjs")
     assert r.returncode == 0 and "board ok" in r.stdout, r.stderr
+
+
+def test_demo_mode_boots_the_page_on_fixtures_and_every_string_is_in_the_table(tmp_path):
+    r = run_check(tmp_path, "page_check.mjs")
+    assert r.returncode == 0 and "page ok" in r.stdout, r.stderr
+
+
+def test_no_motion_of_our_own():
+    """Motion comes only from host components, which honour prefers-reduced-motion."""
+    src = (ROOT / "ui" / "index.mjs").read_text(encoding="utf-8")
+    assert not any(w in src for w in ("animate-", "transition", "@keyframes", "animation"))
