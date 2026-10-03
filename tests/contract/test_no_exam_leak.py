@@ -80,3 +80,18 @@ def test_the_setter_facts_show_a_regression_exam_and_never_a_hidden_one(tmp_path
     text = load().setter_facts(checkout(tmp_path), bank)([SIG])
     assert "the regression probe command" in text and prompts.leaks(text, rows) == []
     assert prompts.leaks("see " + json.dumps(rows[0]["check"]), rows) == ["exam_hidden_probe"]  # a check is exam text too
+
+
+def test_a_dispatch_seed_names_no_exam_and_refuses_one_that_would(tmp_path, monkeypatch):
+    sys.path.insert(0, str(ROOT))
+    from backend import dispatch
+
+    monkeypatch.setenv("HARNESS_RSI_DATA", str(data_dir(tmp_path)))
+    card = {**json.loads((ROOT / "fixtures" / "proposals.json").read_text())[0], "exam_ids": [BANK[0]["id"]]}
+    signals = [{**s, "id": card["signal_ids"][0]} for s in SIGNALS[:1]]
+    text = dispatch.seed(card, signals, {"verdict": None, "matches": [{"number": 1, "state": "OPEN", "title": "t"}]})
+    assert card["pain"] in text and prompts.leaks(text, BANK) == [] and "exam_" not in text
+    poisoned = [{**signals[0], "pain": "Users say: " + BANK[1]["task"]}]
+    with pytest.raises(ValueError, match="exams never go to the worker"):
+        dispatch.seed(card, poisoned, None)
+

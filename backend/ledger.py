@@ -1,14 +1,14 @@
 """The outcome ledger: ``$HARNESS_RSI_DATA/outcomes.jsonl``, one ``outcome`` schema row per line.
 
 A change appends the whole row; the newest row per ``(card_id, pr)`` is current, and a row that
-fails the schema is left out. Card -> decision -> PR -> merge sha -> judge score -> regress, plus the crew prompt versions behind the card.
+fails the schema is left out. Card -> decision -> PR -> merge sha -> judge score -> regress, plus the crew prompt versions behind the card and the worker chat dispatched for it.
 """
 
 import datetime as dt
 import json
 import threading
 
-from . import store
+from . import dispatch, store
 
 FILE = "outcomes.jsonl"
 _LOCK = threading.Lock()
@@ -21,13 +21,13 @@ def now():
 def blank(pr, card_id=None, link="board"):
     return {"card_id": card_id, "decision": None, "pr": pr, "link": link, "state": "open", "base_sha": None, "head_sha": None,
             "merged_sha": None, "exam_ids": [], "score": {"base": None, "head": None, "metrics": None}, "promoted": [],
-            "regress": [], "prompt_versions": None, "note": "", "at": now()}
+            "regress": [], "prompt_versions": None, "dispatch": None, "note": "", "at": now()}
 
 
 def rows():
-    """Current rows, in the order they were first written; a row from before prompt versions reads as null."""
+    """Current rows, in the order they were first written; a row from before prompt versions or dispatch reads them as null."""
     latest = {}
-    old = ({"prompt_versions": None, **r} if isinstance(r, dict) else r for r in store._jsonl(FILE))
+    old = ({"prompt_versions": None, "dispatch": None, **r} if isinstance(r, dict) else r for r in store._jsonl(FILE))
     for r in (r for r in old if store.valid("outcome", r)):
         latest[(r["card_id"], r["pr"])] = r
     return list(latest.values())
@@ -49,5 +49,7 @@ def put(row):
 
 
 def link(card_id, pr, how="board"):
-    """Link a card to a PR once; an existing link is returned as it is."""
-    return get(card_id, pr) or put(blank(pr, card_id, how))
+    """Link a card to a PR once, with the worker chat that was dispatched for it; an existing link is returned as it is."""
+    sent = dispatch.current(card_id) if card_id else None
+    chat = {"session": sent["session"], "at": sent["at"]} if sent and sent["session"] else None
+    return get(card_id, pr) or put({**blank(pr, card_id, how), "dispatch": chat})

@@ -30,6 +30,8 @@ export function backendSource(api) {
     score: () => api.post(`${BASE}/score/run`, {}),
     promptChanges: async () => (await api.get(`${BASE}/prompt-changes`)).changes,
     decidePrompt: async (id, decision) => (await api.post(`${BASE}/prompt-changes/decide`, { id, decision })).change,
+    dispatchConf: async () => (await api.get(`${BASE}/dispatch`)).dispatch,
+    saveDispatch: async (conf) => (await api.post(`${BASE}/dispatch`, conf)).dispatch,
   }
 }
 
@@ -82,6 +84,28 @@ export function ScheduleForm({ conf, onChange, onSave, note }) {
       h('input', { name: 'kirocrew_dir', value: conf.kirocrew_dir, onChange: set('kirocrew_dir'), style: { width: '100%' } })),
     h('div', { style: row({ alignItems: 'center' }) }, h(Btn, { type: 'button', primary: true, onClick: onSave }, 'Save schedule'),
       h('span', { style: muted, 'aria-live': 'polite' }, note)))
+}
+/** The owner's auto-dispatch (backend.dispatch): off until checked here and saved. */
+export function DispatchForm({ conf, onChange, onSave, note }) {
+  const field = { display: 'block', marginTop: 10, ...muted }
+  return h(Card, { 'data-testid': 'dispatch' },
+    h('div', { style: label }, 'Auto-dispatch'),
+    h('div', { style: muted }, 'Off until you check the box and save. When on, 做 on a proposal card opens one worker chat that builds it as one small PR, CI green, never merged. Prompt-change cards never dispatch.'),
+    h('label', { style: { display: 'flex', gap: 8, marginTop: 10 } }, h('input', { type: 'checkbox', name: 'auto_dispatch',
+      checked: conf.auto_dispatch, onChange: (e) => onChange({ ...conf, auto_dispatch: e.target.checked }) }), 'Open a worker chat when I press 做'),
+    h('label', { style: field }, 'Target repos (allowlist)', h('input', { name: 'repos', value: conf.repos.join(', '), style: { width: '100%' },
+      onChange: (e) => onChange({ ...conf, repos: words(e.target.value) }) })),
+    h('label', { style: field }, 'Dispatches a day (1-10) ', h('input', { name: 'daily_cap', type: 'number', min: 1, max: 10,
+      value: conf.daily_cap, onChange: (e) => onChange({ ...conf, daily_cap: Number(e.target.value) }) })),
+    h('div', { style: row({ alignItems: 'center' }) }, h(Btn, { type: 'button', primary: true, onClick: onSave }, 'Save auto-dispatch'),
+      h('span', { style: muted, 'aria-live': 'polite' }, note)))
+}
+/** A card's worker-chat line: opening, a link to the chat, or why the dispatch failed. */
+export function DispatchLine({ row: d }) {
+  if (!d) return null
+  if (d.state === 'error') return h('div', { role: 'alert', 'data-testid': 'dispatch-line', style: { color: 'var(--danger)', fontSize: 13, marginTop: 8 } }, `Dispatch failed: ${d.error}`)
+  return h('div', { 'data-testid': 'dispatch-line', style: { ...muted, marginTop: 8 } }, d.state === 'pending' ? 'Opening a worker chat…'
+    : h('a', { href: `/chat?slot=${encodeURIComponent(d.session)}`, style: { color: 'var(--accent)' } }, `Worker chat: ${d.session}`))
 }
 const at = (s) => (s ? new Date(s).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }) : '')
 /** One line of result for a run record. */
@@ -150,7 +174,7 @@ export function Outcomes({ proposal: p, outcomes, onLink }) {
       style: { width: 140 } }), h(Btn, { type: 'submit' }, 'Link PR')) : null)
 }
 
-export function ProposalCard({ proposal: p, before, onDecide, outcomes, onLink }) {
+export function ProposalCard({ proposal: p, before, onDecide, outcomes, onLink, dispatch }) {
   const titleId = `pain-${p.id}`
   const slug = p.mock_artifact_slug
   return h(Card, { role: 'region', 'aria-labelledby': titleId, 'data-testid': 'proposal-card', 'data-id': p.id },
@@ -176,7 +200,8 @@ export function ProposalCard({ proposal: p, before, onDecide, outcomes, onLink }
       DECISIONS.map(([value, text]) => h(Btn, { key: value, type: 'button', 'data-decision': value,
         primary: p.decision === value, 'aria-pressed': p.decision === value, onClick: () => onDecide(p.id, value) }, text)),
       h('span', { style: muted, 'aria-live': 'polite' },
-        p.decision ? `Decided: ${DECISIONS.find((d) => d[0] === p.decision)[2]}` : 'Not decided')))
+        p.decision ? `Decided: ${DECISIONS.find((d) => d[0] === p.decision)[2]}` : 'Not decided')),
+    h(DispatchLine, { row: dispatch }))
 }
 
 const VERDICT = { better: 'ok', worse: 'err', same: 'muted' }
@@ -204,11 +229,11 @@ export function PromptChangeCard({ change: c, onDecide }) {
           'aria-pressed': c.status === value, onClick: () => onDecide(c.id, value) }, text))))
 }
 
-export function Board({ proposals, images = {}, onDecide, outcomes, onLink }) {
+export function Board({ proposals, images = {}, onDecide, outcomes, onLink, dispatches = [] }) {
   if (!proposals.length) return h(EmptyState, { icon: null, title: 'No proposals yet' })
   return h('div', { style: { display: 'flex', flexDirection: 'column', gap: 12 } }, byHeat(proposals).map((p) =>
     h(ProposalCard, { key: p.id, proposal: p, before: images[p.id]?.before, onDecide,
-      outcomes: outcomes && outcomes.filter((o) => o.card_id === p.id), onLink })))
+      outcomes: outcomes && outcomes.filter((o) => o.card_id === p.id), onLink, dispatch: dispatches.find((d) => d.card_id === p.id) })))
 }
 
 const COLS = ['Pain', 'People', 'Mentions', 'Days', 'Source', 'Layer']
@@ -256,7 +281,7 @@ export function RunRound({ armed, running, onArm, onConfirm, onCancel }) {
 /** The page body. `load` is the data source; `onDecide` saves a choice; `onRefresh` pulls
  *  signals; `onStatus` reads the GitHub job, polled while it runs. */
 export function HarnessRsi({ load, onDecide, onRefresh, onStatus, onSettings, onSaveSettings, onRegress, onRoundStatus, onRunRound,
-  onSchedule, onSaveSchedule, onOutcomes, onLink, onScore, onPromptChanges, onDecidePrompt }) {
+  onSchedule, onSaveSchedule, onOutcomes, onLink, onScore, onPromptChanges, onDecidePrompt, onDispatchConf, onSaveDispatch }) {
   const [changes, setChanges] = useState([])
   const loadChanges = useCallback(() => onPromptChanges?.().then(setChanges, () => {}), [onPromptChanges])
   useEffect(() => { loadChanges() }, [loadChanges])
@@ -274,6 +299,9 @@ export function HarnessRsi({ load, onDecide, onRefresh, onStatus, onSettings, on
   useEffect(() => { onSchedule?.().then((v) => setSched([v, '']), () => {}) }, [onSchedule])
   const saveSched = () => onSaveSchedule(sched.schedule).then(() => onSchedule())
     .then((v) => setSched([v, 'Saved']), (e) => setSched([sched, `Not saved: ${why(e)}`]))
+  const [[disp, dispNote], setDisp] = useState([null, ''])
+  useEffect(() => { onDispatchConf?.().then((v) => setDisp([v, '']), () => {}) }, [onDispatchConf])
+  const saveDisp = () => onSaveDispatch(disp).then((v) => setDisp([v, 'Saved']), (e) => setDisp([disp, `Not saved: ${why(e)}`]))
   const [regress, setRegress] = useState(undefined)
   useEffect(() => { onRegress?.().then(setRegress, () => {}) }, [onRegress])
   const [[data, error], setState] = useState([null, ''])
@@ -304,7 +332,7 @@ export function HarnessRsi({ load, onDecide, onRefresh, onStatus, onSettings, on
   const decide = (id, decision) => {
     setState(([d]) => [{ ...d, proposals: applyDecision(d.proposals, id, decision) }, ''])
     const said = DECISIONS.find((x) => x[0] === decision)[1]
-    Promise.resolve(onDecide?.(id, decision)).then(() => { setNote(`Saved: ${said}`); reload() },
+    Promise.resolve(onDecide?.(id, decision)).then(() => { setNote(`Saved: ${said}`); reload(); loadOut() },
       (e) => { setNote(`Could not save the decision: ${why(e)}`); reload() })
   }
   const failed = (what) => (e) => setNote(`Could not ${what}: ${why(e)}`)
@@ -323,11 +351,12 @@ export function HarnessRsi({ load, onDecide, onRefresh, onStatus, onSettings, on
         form ? h(SettingsForm, { form, note: formNote, onSave: save, onChange: (f) => setForm([f, '']) })
           : h('div', { style: muted }, formNote || 'Loading…'),
         sched ? h(ScheduleForm, { conf: sched.schedule, note: schedNote, onSave: saveSched,
-          onChange: (c) => setSched([{ ...sched, schedule: c }, '']) }) : null)
+          onChange: (c) => setSched([{ ...sched, schedule: c }, '']) }) : null,
+        disp ? h(DispatchForm, { conf: disp, note: dispNote, onSave: saveDisp, onChange: (c) => setDisp([c, '']) }) : null)
       : tab === 'board' ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: 12 } },
         sched ? h(Runs, { runs: sched.runs }) : null,
         changes.map((c) => h(PromptChangeCard, { key: c.id, change: c, onDecide: decidePrompt })), h(Board, { proposals: data.proposals, images: data.images, onDecide: decide,
-          outcomes: out?.outcomes, onLink: onLink && linkPr }))
+          outcomes: out?.outcomes, onLink: onLink && linkPr, dispatches: out?.dispatches }))
         : h(Signals, { signals: data.signals })
   return h('div', { style: { flex: 1, overflowY: 'auto' } },
     h(PageHeader, { title: 'Harness RSI', subtitle: 'Pick what to build next. Nothing runs until you decide.' }),
@@ -358,5 +387,6 @@ export default function HarnessRsiPage() {
   return h(HarnessRsi, { load: src.load, onDecide: src.decide, onRefresh: src.refresh, onStatus: src.status,
     onSettings: src.settings, onSaveSettings: src.saveSettings, onRegress: src.regress,
     onRoundStatus: src.round, onRunRound: src.runRound, onSchedule: src.schedule, onSaveSchedule: src.saveSchedule,
-    onOutcomes: src.outcomes, onLink: src.link, onScore: src.score, onPromptChanges: src.promptChanges, onDecidePrompt: src.decidePrompt })
+    onOutcomes: src.outcomes, onLink: src.link, onScore: src.score, onPromptChanges: src.promptChanges, onDecidePrompt: src.decidePrompt,
+    onDispatchConf: src.dispatchConf, onSaveDispatch: src.saveDispatch })
 }
