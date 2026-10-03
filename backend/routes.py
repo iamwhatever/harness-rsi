@@ -13,6 +13,8 @@ and the scoring job; ``POST /outcomes/link`` links a card to a KiroCrew PR; ``PO
 starts ``python -m backend.autoscore`` (single-flight; the tick does when scoring is on).
 ``GET /prompt-changes`` lists the proposer's prompt-change cards; ``POST /prompt-changes/decide``
 records the owner's choice, and 做 applies the change (``backend.prompt_changes``).
+``/dispatch``: the owner's opt-in auto-dispatch (``backend.dispatch``, off by default); when on, 做 on a
+proposal card opens one worker chat for it. A prompt-change card never dispatches.
 No startup hook, no timer in the gateway.
 """
 
@@ -33,7 +35,7 @@ except ImportError:  # tests and the CLI import ``backend`` as a top-level packa
     import adapters.sessions
     import adapters.slack
 
-from . import ledger, prompt_changes, round_job, schedule, settings, store
+from . import dispatch, ledger, prompt_changes, round_job, schedule, settings, store
 
 APP_NAME = "harness-rsi"
 MAX_BODY = 2 * 1024 * 1024
@@ -151,11 +153,13 @@ async def _decide(request, ctx):
     pid, decision = body.get("proposal_id"), body.get("decision")
     if decision not in store.DECISIONS:
         return _err(400, "bad_decision", "decision must be do, skip or later")
-    known = {p["id"] for p in await asyncio.to_thread(store.read_proposals)}
-    if pid not in known:
+    card = next((p for p in await asyncio.to_thread(store.read_proposals) if p["id"] == pid), None)
+    if card is None:
         return _err(404, "unknown_proposal", "no such proposal")
-    appended = await asyncio.to_thread(store.append_decision, pid, decision)
-    return web.json_response({"ok": True, "appended": appended})
+    out = {"ok": True, "appended": await asyncio.to_thread(store.append_decision, pid, decision)}
+    if decision == "do" and (row := await dispatch.on_do(request, card)) is not None:
+        out["dispatch"] = row
+    return web.json_response(out)
 
 
 def _job_view():
@@ -217,7 +221,8 @@ def start_score(kc):
 
 async def _outcomes(request, ctx):
     score = {k: v for k, v in SCORE.items() if k != "task"}
-    return web.json_response({"ok": True, "outcomes": await asyncio.to_thread(ledger.rows), "score": score})
+    outcomes, sent = await asyncio.to_thread(lambda: (ledger.rows(), dispatch.rows()))
+    return web.json_response({"ok": True, "outcomes": outcomes, "score": score, "dispatches": sent})
 
 
 async def _link(request, ctx):
@@ -308,6 +313,14 @@ async def _schedule_tick(request, ctx):
     return web.json_response({"ok": True, **out})
 
 
+async def _dispatch_get(request, ctx):
+    return web.json_response({"ok": True, "dispatch": await asyncio.to_thread(dispatch.read)})
+
+
+async def _dispatch_post(request, ctx):
+    return await _save(request, dispatch, "dispatch", dict)
+
+
 async def _prompt_changes(request, ctx):
     return web.json_response({"ok": True, "changes": await asyncio.to_thread(prompt_changes.read)})
 
@@ -348,6 +361,8 @@ def register_routes(ctx):
         AppRoute(method="GET", path="/outcomes", handler=_outcomes),
         AppRoute(method="POST", path="/outcomes/link", handler=_link),
         AppRoute(method="POST", path="/score/run", handler=_score_post),
+        AppRoute(method="GET", path="/dispatch", handler=_dispatch_get),
+        AppRoute(method="POST", path="/dispatch", handler=_dispatch_post),
         AppRoute(method="GET", path="/prompt-changes", handler=_prompt_changes),
         AppRoute(method="POST", path="/prompt-changes/decide", handler=_prompt_decide),
     ]

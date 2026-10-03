@@ -11,11 +11,12 @@
     "Three buttons per card set the decision: 做 / 不做 / 以后再说",
     "Signals tab ordered by heat, merged duplicates marked",
     "Nothing on its own by default: it shows the shared data, records your choice, refreshes signals when you press Refresh, and runs a design-crew round when you press Run round and confirm. An optional schedule (off until you turn it on in Settings) runs one round a week and a daily regression check, each ending in one notification; it never posts to Slack, opens a PR or merges",
+    "Optional auto-dispatch (off until you turn it on in Settings): 做 on a proposal card opens one worker chat, seeded with the card, that builds it as one small PR to an allowlisted repo, CI green, never merged; at most 2 a day by default",
     "Reads Slack itself through your own Slack MCP server (read tools only, allowlisted channel ids); off until you set the command on the Settings tab"
   ],
   "defaultEnabled": false,
   "platform": {"os": ["macos", "linux", "windows"]},
-  "permissions": {"api": ["/api/apps/harness-rsi", "/api/apps/harness-rsi/*"], "events": [], "mcpTools": [], "storage": false, "network": true, "cron": true, "spawn": false},
+  "permissions": {"api": ["/api/apps/harness-rsi", "/api/apps/harness-rsi/*", "/api/chat"], "events": [], "mcpTools": [], "storage": false, "network": true, "cron": true, "spawn": false},
   "crons": [{"name": "schedule-tick", "cron_expr": "5 * * * *", "script": "schedule_tick.py:run", "silent": true, "persistent_session": false}],
   "notifications": {"channels": [
     {"id": "rounds", "name": "Rounds", "icon": "ListChecks", "defaultPriority": "default"},

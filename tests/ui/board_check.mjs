@@ -201,4 +201,26 @@ assert.deepEqual(picked, [[pc.id, 'do'], [pc.id, 'skip'], [pc.id, 'later']])
 const done = expand(ui.PromptChangeCard({ change: { ...pc, status: 'applied', ab: null }, onDecide() {} }))
 assert.equal(find(done, (n) => n.type === 'button').length, 0)
 assert.ok(text(done[0]).includes('Applied: rsi-question-setter now runs v0123456789') && text(done[0]).includes('No A/B run yet'))
+// Auto-dispatch: the source reads and saves it; the form starts off; a card shows its worker chat or why it failed.
+const dconf = { auto_dispatch: false, repos: ['kirodotdev/KiroCrew'], daily_cap: 2 }
+const dapi = { get: async (p) => { assert.equal(p, '/api/apps/harness-rsi/dispatch'); return { dispatch: dconf } },
+  post: async (p, b) => { assert.equal(p, '/api/apps/harness-rsi/dispatch'); return { dispatch: b } } }
+assert.deepEqual(await ui.backendSource(dapi).dispatchConf(), dconf)
+assert.deepEqual(await ui.backendSource(dapi).saveDispatch({ ...dconf, auto_dispatch: true }), { ...dconf, auto_dispatch: true })
+const dedits = []
+const dform = expand(ui.DispatchForm({ conf: dconf, note: '', onSave: () => dedits.push('save'), onChange: (c) => dedits.push(c) }))
+const dbox = find(dform, (n) => n.props?.name === 'auto_dispatch')[0]
+assert.equal(dbox.props.checked, false)
+dbox.props.onChange({ target: { checked: true } })
+find(dform, (n) => n.props?.name === 'repos')[0].props.onChange({ target: { value: 'a/b, c/d' } })
+find(dform, (n) => n.props?.name === 'daily_cap')[0].props.onChange({ target: { value: '3' } })
+find(dform, (n) => n.type === 'button')[0].props.onClick()
+assert.deepEqual(dedits, [{ ...dconf, auto_dispatch: true }, { ...dconf, repos: ['a/b', 'c/d'] }, { ...dconf, daily_cap: 3 }, 'save'])
+const sentRow = { card_id: 'prop_bg_tasks', state: 'dispatched', session: 'rsi-bg-tasks-1', error: '' }
+const dcard = expand(ui.ProposalCard({ proposal: proposals[0], onDecide() {}, dispatch: sentRow }))
+assert.equal(find(dcard, (n) => n.type === 'a' && n.props.href === '/chat?slot=rsi-bg-tasks-1').length, 1)
+const failedLine = expand(ui.DispatchLine({ row: { ...sentRow, state: 'error', session: null, error: 'daily cap of 2 reached' } }))
+assert.equal(failedLine[0].props.role, 'alert')
+assert.equal(text(failedLine[0]), 'Dispatch failed: daily cap of 2 reached')
+assert.equal(ui.DispatchLine({ row: undefined }), null)
 console.log('board ok')

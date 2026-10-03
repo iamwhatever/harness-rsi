@@ -34,7 +34,8 @@ def test_manifest_is_opt_in_with_no_automatic_actions():
     assert {c["id"]: c["defaultPriority"] for c in m["notifications"]["channels"]} == {"rounds": "default", "regressions": "critical"}
     assert m["backend"] == {"hooks": {"routes": "backend.routes:register_routes"}}  # no startup hook, no loop
     perms = m["permissions"]
-    assert perms["api"] == ["/api/apps/harness-rsi", "/api/apps/harness-rsi/*"]  # no Slack Radar route
+    # no Slack Radar route; /api/chat only for opt-in auto-dispatch, which opens app-owned chats (backend.dispatch)
+    assert perms["api"] == ["/api/apps/harness-rsi", "/api/apps/harness-rsi/*", "/api/chat"]
     assert not any(perms[k] for k in ("events", "mcpTools", "storage", "spawn")) and perms["cron"] is True
     assert (ROOT / "ui" / m["ui"]["entry"]).is_file()
     assert [p["route"] for p in m["ui"]["pages"]] == ["/apps/harness-rsi"]
