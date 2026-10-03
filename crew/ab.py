@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
 """Offline A/B of one crew prompt: replay saved rounds with A (the current prompt) and B (a variant).
 
-Hard metrics, one sample per round and repeat: ``setter_hit_rate`` (exams that run, fail on a merged fix PR's base
-and pass on its head, over the exams and uncovered signals aimed at it: sharing a link with the fix card's signals,
-or linking the PR); ``adopt_rate`` (proposals on a pain marked 做 or solved by a merged PR); ``prior_art_fp_rate``
-(proposals on a pain whose linked PR merged before the round); ``credits_per_turn``. ``judge.core.paired`` reads
-each both ways: worse / better beyond the noise band, else same. Replies are cached by prompt version under
-``$HARNESS_RSI_DATA/ab/cache``. Usage: ``python3 crew/ab.py --agent rsi-question-setter --variant B.md --kirocrew KC [--rounds 3 4 5] [--reps 3]``
+Hard metrics per round and repeat: ``setter_hit_rate`` (exams that run, fail on a merged fix PR's base and pass on
+its head, over the exams and uncovered signals sharing a link with the fix card's signals or linking the PR),
+``adopt_rate`` (proposals on a pain marked 做 or solved by a merged PR), ``prior_art_fp_rate`` (on a pain whose PR
+merged before the round), ``credits_per_turn``. ``judge.core.paired`` reads each both ways. Replies are cached by
+prompt version. Usage: ``python3 crew/ab.py --agent AGENT --variant B.md --kirocrew KC [--rounds 3 4 5] [--reps 3]``
 """
 
 from __future__ import annotations
@@ -15,6 +14,7 @@ import argparse
 import datetime as dt
 import json
 import os
+import re
 import statistics
 import subprocess
 import sys
@@ -64,12 +64,25 @@ def fixes(data: Path) -> list[dict]:
 
 
 def judge_exam(exam: dict, base: Path, head: Path, context: list) -> str:
-    """``hit`` when the exam runs, fails on base and passes on head; else why not."""
+    """``hit`` when the exam runs, fails on base and passes on head; else why not (for a head failure, its error class)."""
     if behaviour.refusal(exam, context):
         return "refused by behaviour rule"
     got = [core.run_check(exam["check"], {"workdir": t, "shots": t / "shots", "metrics": {}, "round": None,
                                           "comparer": png.diff_ratio})[0] for t in (base, head)]
-    return "cannot run" if None in got else "passes on base" if got[0] else "fails on head" if not got[1] else "hit"
+    if None in got or got[0] or got[1]:
+        return "cannot run" if None in got else "passes on base" if got[0] else "hit"
+    return "fails on head: " + error_class(exam["check"], head)
+
+
+def error_class(check: dict, tree: Path) -> str:
+    """The last ``*Error`` / ``*Exception`` name an exit-code check prints, else its exit code: a reason, no exam text."""
+    if check["kind"] != "exit_code":
+        return check["kind"]
+    try:
+        p = subprocess.run(check["cmd"], cwd=tree, capture_output=True, text=True, timeout=check.get("timeout_s", 120))
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return type(exc).__name__
+    return (re.findall(r"\b[A-Z][A-Za-z]*(?:Error|Exception)\b", p.stderr + p.stdout) or [f"exit {p.returncode}"])[-1]
 
 
 def setter_sample(reply: str, signals: list[dict], rnd: int, fx: list[dict], trees: Callable) -> tuple[float | None, Counter]:
@@ -116,8 +129,7 @@ def replay(data: Path, agent: str, texts: dict, call: Call, signals: list[dict],
     path = data / "ab" / "cache" / ("setter" if agent == rr.SETTER else "reviewers") / prompts.version(key) / f"r{rnd}-{rep}.json"
     if not path.is_file():
         spent = []
-
-        def turn(name: str, message: str) -> str:
+        def turn(name: str, message: str) -> str:  # noqa: E306
             reply, credits = call(name, texts[name], message)
             spent.append(credits)
             return reply
@@ -139,21 +151,17 @@ def run(data: Path, agent: str, variant: str, call: Call, trees: Callable, round
         exams = [json.loads(p.read_text(encoding="utf-8")) for p in sorted((d / "exams" / "hidden").glob("*.json"))]
         for arm, rep in ((a, r) for a in arms for r in range(reps)):
             got = replay(data, agent, arms[arm], call, signals, rnd, rep)
-            if agent == rr.SETTER:
-                hit, c = setter_sample(got["reply"], signals, rnd, fx, trees)
-                why[arm].update(c)
-                vals = {"setter_hit_rate": hit}
-            else:
-                vals = reviewer_sample(got["reply"], signals, exams, deck, merged_at or {})
+            hit, c = setter_sample(got["reply"], signals, rnd, fx, trees) if agent == rr.SETTER else (None, Counter())
+            why[arm].update(c)
+            vals = {"setter_hit_rate": hit} if agent == rr.SETTER else reviewer_sample(got["reply"], signals, exams, deck, merged_at or {})
             vals["credits_per_turn"] = got["credits"] / got["turns"] if got["credits"] is not None else None
             for m, x in vals.items():
                 samples[arm].setdefault(m, []).extend([] if x is None else [x])
     mean = lambda xs: round(statistics.fmean(xs), 4) if xs else None  # noqa: E731
     metrics = {m: {"A": mean(a), "B": mean(samples["B"][m]), "verdict": verdict(m, a, samples["B"][m]),
                    "samples": {"A": a, "B": samples["B"][m]}} for m, a in samples["A"].items()}
-    return {"agent": agent, "A": prompts.version(texts[agent]), "B": prompts.version(variant), "rounds": sorted(saved_rounds(
-        data, rounds)), "reps": reps, "metrics": metrics, "failures": {k: dict(v) for k, v in why.items()},
-        "at": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")}
+    return {"agent": agent, "A": prompts.version(texts[agent]), "B": prompts.version(variant), "rounds": sorted(saved_rounds(data, rounds)),
+            "reps": reps, "metrics": metrics, "failures": {k: dict(v) for k, v in why.items()}, "at": dt.datetime.now(dt.timezone.utc).isoformat()}
 
 
 def kiro_call(run_dir: Path) -> Call:
@@ -162,9 +170,8 @@ def kiro_call(run_dir: Path) -> Call:
         spec = {**json.loads((ROOT / "crew" / "agents" / f"{name}.json").read_text(encoding="utf-8")), "prompt": text}
         (run_dir / ".kiro" / "agents").mkdir(parents=True, exist_ok=True)
         (run_dir / ".kiro" / "agents" / f"{name}.json").write_text(json.dumps(spec), encoding="utf-8")
-        out = subprocess.run(["kiro-cli", "chat", "--agent", name, "--output-format", "stream-json",
-                              "--trust-tools=" + ",".join(spec["allowedTools"]), message],
-                             cwd=run_dir, capture_output=True, text=True, timeout=1800).stdout
+        out = subprocess.run(["kiro-cli", "chat", "--agent", name, "--output-format", "stream-json", "--trust-tools="
+                              + ",".join(spec["allowedTools"]), message], cwd=run_dir, capture_output=True, text=True, timeout=1800).stdout
         events = [json.loads(x) for x in out.splitlines() if x.startswith("{")]
         text_out = "".join(e["data"]["update"]["content"].get("text", "") for e in events if e.get("type") == "sessionUpdate"
                            and e["data"].get("update", {}).get("sessionUpdate") == "agent_message_chunk")

@@ -342,11 +342,7 @@ def run_round(*, agent: Agent, collectors: list[Callable[[], list[dict]]], save_
 
 
 def kiro_agent(run_dir: Path, replies: dict[str, str], texts: dict[str, str] | None = None) -> Agent:
-    """Run each role with kiro-cli from a dir holding local copies of crew/agents/*.json.
-
-    Each copy carries ``texts[name]`` as its prompt; by default the effective prompts of the data dir
-    ``run_dir`` sits in (``prompts.effective``), so an applied prompt change is what runs.
-    """
+    """Run each role with kiro-cli from copies of crew/agents/*.json carrying ``texts`` (default: run_dir's data dir's effective prompts)."""
     agents = run_dir / ".kiro" / "agents"
     agents.mkdir(parents=True, exist_ok=True)
     texts = prompts.effective(run_dir.parent) if texts is None else texts

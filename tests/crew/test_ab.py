@@ -61,7 +61,7 @@ def test_setter_hit_counts_only_exams_that_split_base_from_head(tmp_path):
     assert out["rounds"] == [3] and out["reps"] == 2 and calls == [SETTER] * 4
     hit = out["metrics"]["setter_hit_rate"]
     assert (hit["A"], hit["B"], hit["verdict"]) == (0.0, 1.0, "better")  # A's exam fails on head too
-    assert out["failures"] == {"A": {"fails on head": 2}, "B": {"hit": 2}}  # the off-target exam is not counted
+    assert out["failures"] == {"A": {"fails on head: exit 1": 2}, "B": {"hit": 2}}  # the off-target exam is not counted
     assert out["metrics"]["credits_per_turn"]["verdict"] == "same"
     ab.run(tmp_path, SETTER, variant, call, trees, [3], 2)
     assert len(calls) == 4  # replies are cached by prompt version
@@ -92,3 +92,10 @@ def test_reviewer_rates_from_decisions_and_merge_dates(tmp_path):
     rates = ab.reviewer_sample(transcript, [*sigs, done], exams, ab.cards(tmp_path), {"9": "2026-09-01T00:00:00Z"})
     assert rates == {"adopt_rate": 1 / 3, "prior_art_fp_rate": 1 / 3}
     assert ab.reviewer_sample({"rounds": []}, sigs, exams, {}, {}) == {"adopt_rate": None, "prior_art_fp_rate": None}
+
+
+def test_a_head_failure_names_its_error_class_not_the_exam(tmp_path):
+    check = {"kind": "exit_code", "cmd": ["python3", "-c", "import no_such_module_here"], "expect": 0}
+    assert ab.error_class(check, tmp_path) == "ModuleNotFoundError"
+    assert ab.error_class({"kind": "exit_code", "cmd": ["false"], "expect": 0}, tmp_path) == "exit 1"
+    assert ab.error_class({"kind": "file_assert"}, tmp_path) == "file_assert"
