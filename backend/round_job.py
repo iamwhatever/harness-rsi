@@ -84,7 +84,8 @@ def _run(rnd, sources):
                             collectors=[collector(s, notes) for s in sources], data=data, rnd=rnd,
                             day=dt.date.today().strftime("%Y%m%d"),
                             check_exam=crew().validate_checker(Path(workdir)) if workdir else None,
-                            prior=make_prior())
+                            prior=make_prior(),
+                            facts=crew().setter_facts(Path(workdir), data / "exams") if workdir else None)
 
 
 async def _job(rnd, sources):

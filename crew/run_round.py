@@ -4,7 +4,8 @@
 Steps: collect signals (GitHub adapter, Slack via the owner's Slack MCP when set,
 session scanner, trend scout) -> ``enrich.enrich`` (Slack tasks, cross-source merge)
 -> question setter writes hidden exams from the signals ONLY, before any proposal
-exists -> the two reviewers debate for exactly ``reduce.ROUNDS`` rounds (risk's last
+exists, told what the exam checkout really holds (``target_facts``) and handed its refused exams back
+with the dry run's reasons up to ``REPAIRS`` times -> the two reviewers debate for exactly ``reduce.ROUNDS`` rounds (risk's last
 turn reads ``prior_art``) -> ``reduce.reduce_debate`` -> ``prior_art.apply`` (fixed on
 main = dropped) -> one HTML mock artifact per proposal. Agents,
 collectors and the mock saver are injected, so tests run fakes.
@@ -42,17 +43,20 @@ sys.path.insert(0, str(ROOT / "crew"))
 import enrich  # noqa: E402
 import prior_art  # noqa: E402
 import reduce  # noqa: E402
+import target_facts  # noqa: E402
 
 Agent = Callable[[str, str], str]  # (agent name, task message) -> reply text
-Checker = Callable[[dict], "tuple[bool, str]"]  # exam row -> (runnable, reason): the judge.validate dry run
+Checker = Callable[[dict, list], "tuple[bool, str]"]  # (exam, signal pain) -> (runnable, reason): a dry run
 Saver = Callable[[str, str, str], str]  # (slug, title, html) -> saved slug
 Prior = Callable[[list[dict], list[dict]], dict]  # (candidate rows, signals) -> prior_art.search result
 Classifier = Callable[[dict, list], "tuple[str, str]"]  # (exam, signal/proposal text) -> (status, detail)
+Facts = Callable[[list[dict]], str]  # signals -> what the exam checkout really holds (target_facts.facts)
 DEFAULT_BANK = Path.home() / ".kiro/crew/harness-rsi-data" / "exams"
 SCANNER, SCOUT, SETTER = "rsi-session-scanner", "rsi-trend-scout", "rsi-question-setter"
 VALUE, RISK = reduce.REVIEWERS
 MIN_PROPOSALS, MAX_PROPOSALS = 3, 5
 PER_SOURCE = 40  # hottest rows kept per source, so every agent prompt stays small
+REPAIRS = 2  # times the setter gets its refused exams back with the reasons, before they are dropped
 
 
 class RoundError(RuntimeError):
@@ -101,34 +105,85 @@ def _schema(name: str) -> str:
         (ROOT / "schemas" / f"{name}.schema.json").read_text() + "\n```\n"
 
 
-def setter_message(signals: list[dict], rnd: int) -> str:
-    return f"Round: {rnd}\n" + _signals_block(signals) + _schema("exam") + "Reply with ONLY the JSON array of exam rows."
+def _facts_block(facts: str) -> str:
+    return "Facts about the exam checkout (read from it, trusted):\n" + facts if facts else ""
+
+
+def setter_message(signals: list[dict], rnd: int, facts: str = "") -> str:
+    return (f"Round: {rnd}\n" + _signals_block(signals) + _facts_block(facts) + _schema("exam")
+            + "Reply with ONLY the JSON array of exam rows.")
+
+
+def repair_message(failed: list[tuple[dict, str]], signals: list[dict], rnd: int, facts: str = "") -> str:
+    """The refused exams with the judge's reasons, and only the signals they came from."""
+    origins = {o for row, _ in failed for o in row.get("origin", [])}
+    rows = [{"exam": row, "refused_because": why} for row, why in failed]
+    return (f"Round: {rnd}\n" + _signals_block([s for s in signals if s["id"] in origins]) + _facts_block(facts)
+            + _schema("exam") + "The judge's dry run refused these exams:\n```\n" + json.dumps(rows, indent=1)
+            + "\n```\nRewrite each one, same id, so it runs in the checkout above, or leave it out. "
+            "Reply with ONLY the JSON array of rewritten exam rows.")
 
 
 def write_exams(agent: Agent, signals: list[dict], rnd: int, check: Checker | None = None,
-                refused: list[dict] | None = None) -> list[dict]:
-    """Schema-valid exams on known signals; with `check`, only those whose dry run can execute."""
-    v, known, exams = _validator("exam"), {s["id"] for s in signals}, []
-    for row in parse_rows(agent(SETTER, setter_message(signals, rnd))):
-        row = {**row, "visibility": "hidden", "created_round": rnd, "used_rounds": []}
-        if set(row.get("origin", [])) <= known and not list(v.iter_errors(row)):
-            ok, why = check(row) if check else (True, "")
+                refused: list[dict] | None = None, facts: str = "", repairs: int = REPAIRS) -> list[dict]:
+    """Schema-valid exams on known signals; with `check`, only those whose dry run can execute.
+
+    A refused exam goes back to the setter with its reason, up to `repairs` times; a repair may only
+    rewrite exams it was sent. One refused only because this host cannot run it (``held:``) is not sent
+    back, since no rewrite changes the host. An exam the setter leaves out keeps its last reason.
+    """
+    v, known, exams, out = _validator("exam"), {s["id"] for s in signals}, [], []
+    pain = {s["id"]: s.get("pain", "") for s in signals}
+    reply, sent = agent(SETTER, setter_message(signals, rnd, facts)), None
+    for attempt in range(repairs + 1):
+        failed = {}
+        for row in parse_rows(reply):
+            if sent is not None and row.get("id") not in sent:
+                continue
+            row = {**row, "visibility": "hidden", "created_round": rnd, "used_rounds": []}
+            errors = [e.message for e in v.iter_errors(row)]
+            if not set(row.get("origin", [])) <= known:
+                errors.append("origin names a signal id not in the list")
+            ok, why = (False, "invalid: " + "; ".join(errors)) if errors else \
+                check(row, [pain.get(o, "") for o in row["origin"]]) if check else (True, "")
             if ok:
                 exams.append(row)
-            elif refused is not None:
-                refused.append({"id": row["id"], "detail": why})
+                (sent or {}).pop(row["id"], None)
+            elif why.startswith("held:") or not isinstance(row.get("id"), str):
+                out.append((row, why))
+                (sent or {}).pop(row.get("id"), None)
+            else:
+                failed[row["id"]] = (row, why)
+        out += [rw for i, rw in (sent or {}).items() if i not in failed]  # left out of the repair
+        if not failed or attempt == repairs or check is None:
+            out += failed.values()
+            break
+        sent = failed
+        reply = agent(SETTER, repair_message(list(failed.values()), signals, rnd, facts))
+    if refused is not None:
+        refused.extend({"id": r.get("id"), "detail": w} for r, w in out)
     return exams
 
 
 def validate_checker(workdir: Path) -> Checker:
-    """judge.validate against a KiroCrew checkout (SPA built): an exam that cannot run is never written."""
-    sys.path.insert(0, str(ROOT))
-    from judge import validate
+    """The publish step's own classifier (behaviour rule, module/command probes, a dry run) at write time.
 
-    def check(row: dict) -> tuple[bool, str]:
-        code, report = validate.validate(row, workdir)
-        return code == 0, report["detail"]
+    Only an exam that runs AND fails is written: the round's checkout still has the pain, so an exam
+    passing there cannot see it (``passes-unfixed``). ``held`` (this host cannot run it, e.g. no built
+    SPA) is refused with a ``held:`` reason, which the repair loop does not send back.
+    """
+    classify = bank_classifier(workdir, unfixed=True)
+
+    def check(row: dict, context: list) -> tuple[bool, str]:
+        status, detail = classify(row, context)
+        return status == "runnable", detail if status == "runnable" else f"{status}: {detail}"
     return check
+
+
+def setter_facts(workdir: Path, bank: Path) -> Facts:
+    """target_facts over the exam checkout, with the bank's published exams as worked examples."""
+    metrics = list(json.loads((ROOT / "baseline" / "metrics.json").read_text())["metrics"])
+    return lambda signals: target_facts.facts(workdir, signals, metrics, target_facts.examples(bank / "hidden"))
 
 
 def exam_context(exams: list[dict], signals: list[dict], props: list[dict]) -> dict[str, list[str]]:
@@ -138,20 +193,29 @@ def exam_context(exams: list[dict], signals: list[dict], props: list[dict]) -> d
             + [p.get("pain", "") for p in props if x["id"] in p.get("exam_ids", [])] for x in exams}
 
 
-def bank_classifier(workdir: Path) -> Classifier:
+def bank_classifier(workdir: Path, unfixed: bool = False) -> Classifier:
     """judge.audit's dry run (it also probes modules and commands) after the behaviour rule, with context.
 
     Status ``runnable`` publishes; ``held`` (this host cannot run it, e.g. no browser) waits for the next
-    publish; anything else is a rejection reason.
+    publish; anything else is a rejection reason. With `unfixed`, a runnable exam that passes is
+    ``passes-unfixed``.
     """
     sys.path.insert(0, str(ROOT))
-    from judge import audit, behaviour
+    from judge import audit, behaviour, validate
     work, known = workdir.resolve(), set(json.loads(audit.BASELINE.read_text())["metrics"])
 
     def classify(row: dict, context: list) -> tuple[str, str]:
         if why := behaviour.refusal(row, context):
             return "needs-behaviour-check", why
-        status, detail = audit.classify(row, work, {}, known, 120)
+        seen = {}
+
+        def run(*args):
+            code, report = validate.validate(*args)
+            seen.update(report)
+            return code, report
+        status, detail = audit.classify(row, work, {}, known, 120, run)
+        if unfixed and status == "runnable" and seen.get("status") == "pass":
+            return "passes-unfixed", detail + " (it already passes where the pain is real, so it cannot see it)"
         return ("held" if status in audit.ENV else status), detail
     return classify
 
@@ -238,13 +302,15 @@ def render_mock(p: dict, exams: list[dict], prior: dict | None = None) -> str:
 
 def run_round(*, agent: Agent, collectors: list[Callable[[], list[dict]]], save_mock: Saver,
               data: Path, rnd: int, day: str, check_exam: Checker | None = None,
-              prior: Prior | None = None, bank: Path | None = None, classify_bank: Classifier | None = None) -> dict:
+              prior: Prior | None = None, bank: Path | None = None, classify_bank: Classifier | None = None,
+              facts: Facts | None = None) -> dict:
     batches = [c() for c in collectors]
     batches += [parse_rows(agent(name, f"Today is {day}. Scan now and reply with the JSON array.\n" + _schema("signal")))
                 for name in (SCANNER, SCOUT)]
     signals, _ = enrich.enrich(merge_signals(batches, day))  # Slack tasks + cross-source heat
     refused: list[dict] = []
-    exams = write_exams(agent, signals, rnd, check_exam, refused)  # before the debate: no proposal can exist yet
+    exams = write_exams(agent, signals, rnd, check_exam, refused,  # before the debate: no proposal can exist yet
+                        facts(signals) if facts else "")
     v = _validator("proposal")
     transcript = debate(agent, signals, prior)
     (data / "debate.json").write_text(json.dumps(transcript, indent=1) + "\n")  # kept for audit
@@ -382,7 +448,8 @@ def main(argv: list[str]) -> int:
                                    session_collector()],
                        data=data, rnd=args.round, day=dt.date.today().strftime("%Y%m%d"),
                        check_exam=validate_checker(args.exam_workdir), prior=gh_prior,
-                       bank=args.bank, classify_bank=bank_classifier(args.exam_workdir))
+                       bank=args.bank, classify_bank=bank_classifier(args.exam_workdir),
+                       facts=setter_facts(args.exam_workdir, args.bank))
     published = result.pop("published", {})
     print(json.dumps({**{k: len(v) for k, v in result.items()}, **{k: v for k, v in published.items() if k != "notes"}}))
     return 0

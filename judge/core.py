@@ -61,12 +61,16 @@ def run_check(check, ctx):
     if kind == "exit_code":
         timeout = check.get("timeout_s", 600)
         try:
-            code = subprocess.run(check["cmd"], cwd=work, capture_output=True, timeout=timeout).returncode
+            done = subprocess.run(check["cmd"], cwd=work, capture_output=True, timeout=timeout)
         except subprocess.TimeoutExpired:
             return False, f"timed out after {timeout}s"
         except OSError as exc:
             return None, f"cannot run command: {exc.strerror}"
-        return code == check["expect"], f"exit {code}, expected {check['expect']}"
+        code, detail = done.returncode, f"exit {done.returncode}, expected {check['expect']}"
+        tail = (done.stderr or done.stdout or b"").decode("utf-8", "replace").strip().splitlines()[-1:]
+        if code != check["expect"] and tail:  # a traceback's last line says why, e.g. an import that failed
+            detail += f": {tail[0][:200]}"
+        return code == check["expect"], detail
     if kind == "file_assert":
         path = work / check["path"]
         if not path.is_file():
