@@ -10,8 +10,8 @@ Probes (each on the copy, never on DIR itself):
                     through ``backend.ledger``: does the backend take it as a real score?
     hidden-read     the doc's ``cat exams/hidden/*.json``: is any hidden exam plain JSON?
 
-BROKEN means the break worked. Today every probe is expected BROKEN; once sealing lands
-(encrypted hidden exams, signed ledger rows) forge-accepted and hidden-read must read SEALED.
+BROKEN means the break worked. With sealing in place (encrypted hidden exams, signed ledger
+rows) forge-accepted and hidden-read must read SEALED; forge-write still lands its unsigned row.
 Exam text is never printed. Exit 1 when any probe is BROKEN, 0 when none is and one is SEALED,
 2 when every probe was skipped.
 """
@@ -114,7 +114,7 @@ def main(argv=None):
     args = ap.parse_args(argv)
     src = (args.data or default_data()).expanduser()
     results = run(src)
-    print(f"Break probes on a temp copy of {src} (today: expect BROKEN)\n")
+    print(f"Break probes on a temp copy of {src} (sealed: expect forge-accepted and hidden-read SEALED)\n")
     print("| probe | result | detail |\n|---|---|---|")
     for name, verdict, detail in results:
         print(f"| {name} | {verdict} | {detail} |")
