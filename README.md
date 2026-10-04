@@ -1,6 +1,8 @@
 # kirocrew-rsi
 Harness RSI app for KiroCrew: signal list, judge, design crew, priority cards
 
+Design: [crewmate team (v3.1)](docs/design/crewmate-team.md) — a crewmate lead runs lane conductors, and any App Kit app can use the team.
+
 ## Interfaces
 
 Frozen after R0. To change one, report `question` to the conductor first. All schemas are JSON Schema draft 2020-12 with `additionalProperties: false`.
