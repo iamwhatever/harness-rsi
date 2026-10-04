@@ -24,14 +24,16 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "crew"))
 import prompts  # noqa: E402
+from judge import seal  # noqa: E402  (prompts put the repo root on the path)
 
 PROPOSER = "rsi-prompt-proposer"
 
 
 def ledger_counts(data: Path) -> dict:
-    rows = {}
-    for line in (data / "outcomes.jsonl").read_text(encoding="utf-8").splitlines() if (data / "outcomes.jsonl").is_file() else []:
-        r = json.loads(line)
+    rows, (signed, bad) = {}, seal.signed_lines(data / "outcomes.jsonl", seal.OUTCOMES)
+    if bad:
+        raise ValueError(f"outcome ledger has {bad} unsigned or tampered line(s); this round is void")
+    for r in signed:
         rows[(r["card_id"], r["pr"])] = r
     runs = [((r["score"]["base"] or {}).get("verdict"), (r["score"]["head"] or {}).get("verdict")) for r in rows.values()]
     return {"linked_prs": len(rows), "merged": sum(r["state"] == "merged" for r in rows.values()),

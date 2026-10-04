@@ -1,12 +1,18 @@
 """The outcome ledger: ``$HARNESS_RSI_DATA/outcomes.jsonl``, one ``outcome`` schema row per line.
 
-A change appends the whole row; the newest row per ``(card_id, pr)`` is current, and a row that
-fails the schema is left out. Card -> decision -> PR -> merge sha -> judge score -> regress, plus the crew prompt versions behind the card and the worker chat dispatched for it.
+A change appends the whole row, signed (``judge.seal``); the newest row per ``(card_id, pr)`` is current.
+An unsigned or tampered line is left out and counted by ``integrity``: any such line voids the round
+that reads the ledger. A row that fails the schema is left out. Card -> decision -> PR -> merge sha -> judge score -> regress, plus the crew prompt versions behind the card and the worker chat dispatched for it.
 """
 
 import datetime as dt
 import json
 import threading
+
+try:  # see settings.py: a subpackage in the gateway, top-level in tests and the CLI
+    from ..judge import seal
+except ImportError:
+    from judge import seal
 
 from . import dispatch, store
 
@@ -24,10 +30,20 @@ def blank(pr, card_id=None, link="board"):
             "regress": [], "prompt_versions": None, "dispatch": None, "note": "", "at": now()}
 
 
+def _signed():
+    return seal.signed_lines(store.data_dir() / FILE, seal.OUTCOMES)
+
+
+def integrity():
+    """``{"bad_lines": n, "void": n > 0}``: lines that are unsigned or fail their signature."""
+    bad = _signed()[1]
+    return {"bad_lines": bad, "void": bad > 0}
+
+
 def rows():
-    """Current rows, in the order they were first written; a row from before prompt versions or dispatch reads them as null."""
+    """Current signed rows, in the order they were first written; a row from before prompt versions or dispatch reads them as null."""
     latest = {}
-    old = ({"prompt_versions": None, "dispatch": None, **r} if isinstance(r, dict) else r for r in store._jsonl(FILE))
+    old = ({"prompt_versions": None, "dispatch": None, **r} for r in _signed()[0])
     for r in (r for r in old if store.valid("outcome", r)):
         latest[(r["card_id"], r["pr"])] = r
     return list(latest.values())
@@ -44,7 +60,7 @@ def put(row):
     with _LOCK:
         (path := store.data_dir() / FILE).parent.mkdir(parents=True, exist_ok=True)
         with path.open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+            fh.write(json.dumps(seal.sign(seal.OUTCOMES, row), ensure_ascii=False) + "\n")
     return row
 
 

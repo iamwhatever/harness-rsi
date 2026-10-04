@@ -8,6 +8,8 @@ import re
 import pytest
 from jsonschema import Draft202012Validator
 
+from judge import seal
+
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 SIGNALS = json.loads((ROOT / "fixtures" / "signals.json").read_text())
 
@@ -85,7 +87,7 @@ def test_fake_round_writes_schema_valid_rows(tmp_path):
         assert valid("signal", s) == []
     props = json.loads((tmp_path / "proposals.json").read_text())
     assert 3 <= len(props) <= 5
-    exams = [json.loads(p.read_text()) for p in (tmp_path / "exams" / "hidden").glob("*.json")]
+    exams = [seal.read_json(p) for p in (tmp_path / "exams" / "hidden").glob("*.json")]
     assert exams and all(e["visibility"] == "hidden" and e["created_round"] == 2 for e in exams)
     for row, name in [(p, "proposal") for p in props] + [(e, "exam") for e in exams]:
         assert valid(name, row) == []

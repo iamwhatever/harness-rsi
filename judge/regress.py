@@ -20,7 +20,7 @@ import subprocess
 import sys
 import tempfile
 
-from . import png
+from . import png, seal
 from .core import JudgeError, judge, paired
 
 SUITES = ["regression", "metrics"]
@@ -39,9 +39,15 @@ def _files(root):
 
 def _read(path):
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as exc:
+        return seal.read_json(path)
+    except (OSError, ValueError, seal.SealError) as exc:
         raise JudgeError(f"cannot read {path.name}: {exc}") from exc
+
+
+def runs(runs_dir, sha=None):
+    """``(runs, bad)``: the signed runs in ``runs_dir`` (but ``sha``'s) and how many failed their signature."""
+    got = [seal.read_run(p) for p in sorted(pathlib.Path(runs_dir).glob("*.json")) if p.stem != sha]
+    return [r for r in got if r is not None], sum(r is None for r in got)
 
 
 def load_all(root):
@@ -64,8 +70,11 @@ def _git(repo, *args):
 
 
 def previous(runs_dir, sha):
-    runs = [_read(p) for p in runs_dir.glob("*.json") if p.stem != sha]
-    return max(runs, key=lambda r: r["at"]) if runs else None
+    """The newest signed run but ``sha``'s; JudgeError when any stored run fails its signature (the comparison is void)."""
+    good, bad = runs(runs_dir, sha)
+    if bad:
+        raise JudgeError(f"{bad} stored regress run(s) unsigned or tampered; this run is void")
+    return max(good, key=lambda r: r["at"]) if good else None
 
 
 def diff(now, before, metrics):
@@ -112,7 +121,10 @@ def run(args, runner):
     before = previous(runs_dir, sha)
     now["baseline"] = before["sha"] if before else None
     now["regressions"] = diff(now, before, metrics)
-    (runs_dir / f"{sha}.json").write_text(json.dumps(now, indent=2) + "\n", encoding="utf-8")
+    try:
+        seal.write_run(runs_dir / f"{sha}.json", now)
+    except seal.SealError as exc:
+        raise JudgeError(str(exc)) from exc
     summary = {k: now[k] for k in ("sha", "baseline", "counts", "errors", "regressions")}
     summary["note"] = "no baseline: first regress run" if before is None else f"compared with {before['sha']}"
     return summary
@@ -130,9 +142,10 @@ def promote(exams_dir, exam_id, used_round=None):
             if not exam.get("used_rounds"):
                 raise JudgeError(f"{exam_id} has not been used for its hidden round yet")
             exam["visibility"] = "regression"
-            tmp = path.with_suffix(".tmp")
-            tmp.write_text(json.dumps(doc, indent=2) + "\n", encoding="utf-8")
-            os.replace(tmp, path)
+            try:
+                seal.write_text(path, json.dumps(doc, indent=2) + "\n")
+            except seal.SealError as exc:
+                raise JudgeError(str(exc)) from exc
             return {"promoted": exam_id, "used_rounds": exam["used_rounds"]}
     raise JudgeError(f"no exam {exam_id}")
 

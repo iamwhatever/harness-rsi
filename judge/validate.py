@@ -12,7 +12,7 @@ import sys
 
 from jsonschema import Draft202012Validator
 
-from . import behaviour, png
+from . import behaviour, png, seal
 from .core import run_check
 
 SCHEMA = pathlib.Path(__file__).resolve().parents[1] / "schemas" / "exam.schema.json"
@@ -40,9 +40,9 @@ def main(argv=None):
     ap.add_argument("--metrics", help="metrics JSON, as for the judge")
     args = ap.parse_args(argv)
     try:
-        exam = json.loads(pathlib.Path(args.exam).read_text())
+        exam = seal.read_json(args.exam)
         metrics = json.loads(pathlib.Path(args.metrics).read_text()) if args.metrics else {}
-    except (OSError, ValueError) as exc:
+    except (OSError, ValueError, seal.SealError) as exc:
         print(f"validate: error: {exc}", file=sys.stderr)
         return 2
     code, report = validate(exam, args.workdir, args.shots, metrics)

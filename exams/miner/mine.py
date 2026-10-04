@@ -33,6 +33,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(ROOT))
 from baseline.metrics import OWNER_ORIGINS, STARTERS, _is_json, is_final_error, is_stop  # noqa: E402
+from judge import seal  # noqa: E402
 
 PAINS = ("stop", "steer", "retry", "error", "correction")
 FALLBACK = {
@@ -166,7 +167,7 @@ def seed_dir(data: str | None) -> Path:
 def write(rows: list[dict], out: Path) -> None:
     out.mkdir(parents=True, exist_ok=True)
     for row in rows:
-        (out / f"{row['id']}.json").write_text(json.dumps(row, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        seal.write_text(out / f"{row['id']}.json", json.dumps(row, ensure_ascii=False, indent=2) + "\n")
 
 
 def main() -> None:

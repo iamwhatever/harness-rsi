@@ -9,7 +9,7 @@ import sys
 import pytest
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
-from judge import regress  # noqa: E402
+from judge import regress, seal  # noqa: E402
 
 def git(repo, *args):
     env = {"PATH": "/usr/bin:/bin", **{f"GIT_{w}_{k}": "t@t" for w in ("AUTHOR", "COMMITTER") for k in ("NAME", "EMAIL")}}
@@ -73,7 +73,7 @@ def test_promote_records_an_unrecorded_round_and_rejected_is_ignored(world):
     (tmp / "data/exams/hidden/b.json").write_text(json.dumps(exam("b", "hidden", ())), encoding="utf-8")
     assert regress.main(["promote", "exam_b"], io.StringIO()) == 2  # no round recorded, none given
     assert regress.main(["promote", "exam_b", "--used-round", "2"], io.StringIO()) == 0
-    saved = json.loads((tmp / "data/exams/hidden/b.json").read_text(encoding="utf-8"))
+    saved = seal.read_json(tmp / "data/exams/hidden/b.json")
     assert (saved["visibility"], saved["used_rounds"]) == ("regression", [2])
     (tmp / "data/exams/rejected").mkdir()
     (tmp / "data/exams/rejected/a.json").write_text(json.dumps(exam("a")), encoding="utf-8")  # same id would clash

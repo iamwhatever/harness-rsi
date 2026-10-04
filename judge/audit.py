@@ -15,6 +15,7 @@ import shutil
 import subprocess
 import sys
 
+from . import seal
 from .regress import data_dir
 from .validate import validate
 
@@ -77,14 +78,14 @@ def audit(root, work, metrics=None, known=None, fix=False, spa_root="website/dis
     root, work = pathlib.Path(root), pathlib.Path(work).resolve()
     out = {"total": 0, "runnable": 0, "kept": collections.Counter(), "converted": 0, "rejected": collections.Counter()}
     for path in sorted(p for p in root.rglob("*.json") if "rejected" not in p.relative_to(root).parts):
-        exam = json.loads(path.read_text(encoding="utf-8"))  # the store holds one exam per file
+        exam = seal.read_json(path)  # the store holds one exam per file
         out["total"] += 1
         status, detail = classify(exam, work, metrics, known, cap, runner)
         dom = to_dom(exam, spa_root) if status not in ENV | {"runnable"} else None
         if dom and classify({**exam, "check": dom}, work, metrics, known, cap, runner)[0] == "runnable":
             out["converted"], status = out["converted"] + 1, "runnable"
             if fix:
-                path.write_text(json.dumps({**exam, "check": dom}, indent=2) + "\n", encoding="utf-8")
+                seal.write_text(path, json.dumps({**exam, "check": dom}, indent=2) + "\n")
         if status == "runnable":
             out["runnable"] += 1
         else:

@@ -10,10 +10,14 @@ import asyncio
 import datetime as dt
 import functools
 import importlib.util
-import json
 import os
 import time
 from pathlib import Path
+
+try:  # see settings.py: a subpackage in the gateway, top-level in tests and the CLI
+    from ..judge import seal
+except ImportError:
+    from judge import seal
 
 from . import schedule, store
 
@@ -54,8 +58,8 @@ def next_round():
     rounds = [0]
     for path in (store.data_dir() / "exams" / "hidden").glob("*.json"):
         try:
-            rounds.append(int(json.loads(path.read_text(encoding="utf-8"))["created_round"]))
-        except (OSError, ValueError, KeyError, TypeError):
+            rounds.append(int(seal.read_json(path)["created_round"]))
+        except (OSError, ValueError, KeyError, TypeError, seal.SealError):
             continue
     return max(rounds) + 1
 

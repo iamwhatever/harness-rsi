@@ -8,6 +8,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 sys.path[:0] = [str(ROOT / "crew"), str(ROOT / "tests" / "crew")]
 import ab  # noqa: E402
 import prompts  # noqa: E402
+from judge import seal  # noqa: E402
 from test_run_round import FakeCrew  # noqa: E402
 
 SETTER = "rsi-question-setter"
@@ -35,7 +36,7 @@ def setup(tmp_path):
     (d / "proposals.json").write_text(json.dumps([card]))
     row = {"card_id": "prop_fixed", "pr": "kirodotdev/KiroCrew#7", "state": "merged", "base_sha": SHA["base"],
            "head_sha": SHA["head"], "decision": "do"}
-    (tmp_path / "outcomes.jsonl").write_text(json.dumps(row) + "\n")
+    (tmp_path / "outcomes.jsonl").write_text(json.dumps(seal.sign(seal.OUTCOMES, row)) + "\n")
     trees = {k: tmp_path / k for k in SHA}
     for t in trees.values():
         t.mkdir()

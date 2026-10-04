@@ -90,8 +90,10 @@ def metrics_for(pr):
 
 def regress_rows(row, ids):
     """The merge commit's regress run and every stored run after it, as entries for this card's exams."""
-    runs = sorted((json.loads(p.read_text(encoding="utf-8")) for p in (store.data_dir() / "regress").glob("*.json")),
-                  key=lambda r: r["at"])
+    good, bad = regress.runs(store.data_dir() / "regress")
+    if bad:
+        raise core.JudgeError(f"{bad} stored regress run(s) unsigned or tampered; regress for this card is void")
+    runs = sorted(good, key=lambda r: r["at"])
     start = next((r["at"] for r in runs if r["sha"] == row["merged_sha"]), None)
     out = []
     for run in (r for r in runs if start and r["at"] >= start):
@@ -143,6 +145,8 @@ def tick(kc, only=None, run=subprocess.run, budget=gh_budget):
     """Link, score and follow up every linked PR (or just ``only``); returns a summary."""
     if budget() < DEFAULT_MIN_REMAINING:
         raise RateLimitLow("GitHub API points below the floor")
+    if (seen := ledger.integrity())["void"]:
+        raise ValueError(f"outcome ledger has {seen['bad_lines']} unsigned or tampered line(s); this scoring round is void")
     deck = cards()
     prs = fetch({int(r["pr"].split("#")[1]) for r in ledger.rows() if r["pr"].startswith(REPO + "#")} | {only} - {None}, run)
     for n, pr in ({} if only else prs).items():

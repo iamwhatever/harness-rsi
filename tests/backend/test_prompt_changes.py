@@ -11,6 +11,7 @@ sys.path[:0] = [str(ROOT), str(ROOT / "crew"), str(ROOT / "tests" / "backend")]
 import prompts  # noqa: E402
 import propose  # noqa: E402
 from backend import prompt_changes, routes  # noqa: E402
+from judge import seal  # noqa: E402
 from test_backend import Req, call  # noqa: E402
 
 SETTER = "rsi-question-setter"
@@ -24,9 +25,9 @@ def data(tmp_path, monkeypatch):
     monkeypatch.setenv("HARNESS_RSI_DATA", str(tmp_path))
     (tmp_path / "exams" / "hidden").mkdir(parents=True)
     (tmp_path / "exams" / "hidden" / f"{EXAM['id']}.json").write_text(json.dumps(EXAM))
-    (tmp_path / "outcomes.jsonl").write_text(json.dumps({"card_id": "prop_a", "pr": "o/r#1", "state": "merged", "note": "",
+    (tmp_path / "outcomes.jsonl").write_text(json.dumps(seal.sign(seal.OUTCOMES, {"card_id": "prop_a", "pr": "o/r#1", "state": "merged", "note": "",
                                                           "exam_ids": [EXAM["id"]], "score": {"base": {"verdict": "fail"},
-                                                                                              "head": {"verdict": "pass"}}}) + "\n")
+                                                                                              "head": {"verdict": "pass"}}})) + "\n")
     return tmp_path
 
 
