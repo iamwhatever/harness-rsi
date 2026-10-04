@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import importlib.util
 import json
-import os
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -12,6 +11,8 @@ from pathlib import Path
 
 import pytest
 from jsonschema import Draft202012Validator
+
+from judge import seal
 
 ROOT = Path(__file__).resolve().parents[2]
 FIXTURE = Path(__file__).with_name("fixtures") / "transcripts.json"
@@ -92,11 +93,12 @@ def test_mined_paths_are_git_ignored():
         assert subprocess.run(["git", "check-ignore", "-q", rel], cwd=ROOT).returncode == 0, rel
 
 
-def test_cli_writes_rows_and_prints_only_numbers(home, tmp_path):
+def test_cli_writes_rows_and_prints_only_numbers(home, tmp_path, monkeypatch, capsys):
     data = tmp_path / "data"
-    env = {**os.environ, "HARNESS_RSI_DATA": str(data)}
-    out = subprocess.run([sys.executable, str(ROOT / "exams" / "miner" / "mine.py"), "--home", str(home)],
-                         env=env, capture_output=True, text=True, check=True).stdout
+    monkeypatch.setenv("HARNESS_RSI_DATA", str(data))
+    monkeypatch.setattr(sys, "argv", ["mine.py", "--home", str(home)])
+    miner.main()  # in process: the seal key is the test vault's
+    out = capsys.readouterr().out
     report = json.loads(out)
     assert report["candidates"] == 5 and report["testable"] == 3
     assert report["by_pain"] == {p: 1 for p in miner.PAINS}
@@ -109,4 +111,4 @@ def test_cli_writes_rows_and_prints_only_numbers(home, tmp_path):
     assert numbers(report)
     assert "login" not in out and "wrong file" not in out
     written = sorted((data / "exams" / "seed").glob("exam_*.json"))
-    assert len(written) == 5
+    assert len(written) == 5 and all(seal.is_sealed(p.read_bytes()) for p in written)

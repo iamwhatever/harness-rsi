@@ -15,7 +15,12 @@ import math
 import re
 import shutil
 import subprocess
+import sys
 from pathlib import Path
+
+if (_root := str(Path(__file__).resolve().parents[1])) not in sys.path:
+    sys.path.insert(0, _root)
+from judge import seal  # noqa: E402
 
 COMMANDS = ("python3", "python", "git", "node", "npx", "bash", "pytest")
 PER_SIGNAL, NAMES_PER_MODULE, TESTIDS_PER_SIGNAL = 5, 8, 5
@@ -122,7 +127,10 @@ def examples(bank_hidden: Path) -> list[dict]:
     """Up to one regression exam (judged, no longer hidden) per check kind, smallest first: a hidden exam never reaches a prompt."""
     seen, out = set(), []
     for path in sorted(bank_hidden.glob("exam_*.json"), key=lambda p: p.stat().st_size) if bank_hidden.is_dir() else []:
-        x = json.loads(path.read_text(encoding="utf-8"))
+        try:
+            x = seal.read_json(path)
+        except (OSError, ValueError, seal.SealError):
+            continue
         if x.get("visibility") == "regression" and x.get("check", {}).get("kind") not in seen:
             seen.add(x["check"]["kind"])
             out.append(x)

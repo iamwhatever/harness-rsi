@@ -5,14 +5,13 @@ A check returns (ok, detail). ok is None when the check could not run at all
 """
 
 import hashlib
-import json
 import math
 import pathlib
 import re
 import statistics
 import subprocess
 
-from . import dom
+from . import dom, seal
 
 # A pair is read together: neither metric may get worse beyond its noise band, whatever the other did.
 DEFAULT_PAIRS = [("first_token_ms", "success_rate"), ("tokens_per_turn", "task_completion_rate")]
@@ -31,8 +30,8 @@ def load_exams(exams_dir):
         raise JudgeError(f"exams dir not found: {root} (pass --exams or set HARNESS_RSI_DATA)")
     for path in sorted(root.glob("*.json")):
         try:
-            doc = json.loads(path.read_text())
-        except (OSError, ValueError) as exc:
+            doc = seal.read_json(path)
+        except (OSError, ValueError, seal.SealError) as exc:
             raise JudgeError(f"cannot read exam file {path.name}: {exc}") from exc
         exams.extend(doc if isinstance(doc, list) else [doc])
     if len({e.get("id") for e in exams}) != len(exams):

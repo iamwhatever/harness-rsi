@@ -13,6 +13,7 @@ import pytest
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 from backend import autoscore, ledger, store  # noqa: E402
+from judge import seal  # noqa: E402
 
 PROPOSALS = json.loads((ROOT / "fixtures/proposals.json").read_text(encoding="utf-8"))
 EXAM = {"id": "exam_bg_task_survives_close", "layer": 2, "origin": ["sig_20260101_0001"], "visibility": "hidden",
@@ -94,7 +95,7 @@ def test_detected_pr_is_scored_on_base_and_head_and_fork_code_never_runs(env):
     assert row["score"]["metrics"] is None  # nothing measured for this PR
     fork = ledger.get("prop_bg_tasks", "kirodotdev/KiroCrew#8")
     assert fork["exam_ids"] == [EXAM["id"]] and fork["score"]["head"] is None and fork["note"] == "fork PR: not run"
-    assert all(store.valid("outcome", json.loads(x)) for x in lines(env))
+    assert all(store.valid("outcome", seal.verify(seal.OUTCOMES, json.loads(x))) for x in lines(env))
     assert "Closes the card" not in (env.data / ledger.FILE).read_text(encoding="utf-8")  # no PR body kept
     assert not git(env.kc, "worktree", "list").count("\n")  # every throwaway worktree is gone
 
@@ -111,15 +112,15 @@ def test_an_unchanged_pr_is_not_rescored_and_merge_promotes_and_regresses(env, m
     row = ledger.get("prop_bg_tasks", "kirodotdev/KiroCrew#7")
     assert (row["state"], row["merged_sha"], row["promoted"]) == ("merged", sha, [EXAM["id"]])
     assert [(g["sha"], g["exams"], g["regressions"]) for g in row["regress"]] == [(sha, {EXAM["id"]: "pass"}, 0)]
-    assert json.loads(next((env.data / "exams").rglob(f"{EXAM['id']}.json")).read_text())["visibility"] == "regression"
+    assert seal.read_json(next((env.data / "exams").rglob(f"{EXAM['id']}.json")))["visibility"] == "regression"
     assert (env.data / "regress" / f"{sha}.json").is_file()
-    older = json.loads((env.data / "regress" / f"{sha}.json").read_text())
+    older = seal.read_run(env.data / "regress" / f"{sha}.json")
     older.update(sha="e" * 40, at="2000-01-01T00:00:00+00:00")
-    (env.data / "regress" / ("e" * 40 + ".json")).write_text(json.dumps(older))  # a run from before the merge
-    later = json.loads((env.data / "regress" / f"{sha}.json").read_text())
+    seal.write_run(env.data / "regress" / ("e" * 40 + ".json"), older)  # a run from before the merge
+    later = seal.read_run(env.data / "regress" / f"{sha}.json")
     later.update(sha="f" * 40, at="2999-01-01T00:00:00+00:00", exams={EXAM["id"]: False},
                  regressions=[{"kind": "exam", "exam_id": EXAM["id"]}])
-    (env.data / "regress" / ("f" * 40 + ".json")).write_text(json.dumps(later))  # the daily regress, later
+    seal.write_run(env.data / "regress" / ("f" * 40 + ".json"), later)  # the daily regress, later
     env.tick()
     got = ledger.get("prop_bg_tasks", "kirodotdev/KiroCrew#7")["regress"]
     assert [(g["sha"][:1], g["exams"][EXAM["id"]], g["regressions"]) for g in got] == [(sha[:1], "pass", 0), ("f", "fail", 1)]
@@ -159,5 +160,5 @@ def test_a_scored_row_names_the_prompt_versions_of_the_round_that_wrote_its_card
     assert row["prompt_versions"] == used and store.valid("outcome", row)
     assert autoscore.round_versions("prop_nope") is None
     old = {k: v for k, v in ledger.blank("o/r#3", "prop_bg_tasks").items() if k != "prompt_versions"}
-    (env.data / ledger.FILE).open("a").write(json.dumps(old) + "\n")  # written before prompt versions
+    (env.data / ledger.FILE).open("a").write(json.dumps(seal.sign(seal.OUTCOMES, old)) + "\n")  # written before prompt versions
     assert ledger.get("prop_bg_tasks", "o/r#3")["prompt_versions"] is None

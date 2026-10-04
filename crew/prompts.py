@@ -1,5 +1,6 @@
 """Crew prompt versions (``v`` + 10 hex digits of the text's sha256). The owner's applied change lives in
-``$HARNESS_RSI_DATA/prompts/<agent>.md``, wins over ``crew/agents/prompts/``, and is logged to ``prompt_versions.jsonl``.
+``$HARNESS_RSI_DATA/prompts/<agent>.md`` (sealed: ``judge.seal``), wins over ``crew/agents/prompts/``, and is logged to
+``prompt_versions.jsonl``. Exam files are sealed too: ``bank`` decrypts them in this process.
 Hidden exams never reach a prompt: ``leaks`` finds a hidden exam's id, task or check, and ``apply`` refuses it."""
 
 from __future__ import annotations
@@ -8,9 +9,15 @@ import datetime as dt
 import hashlib
 import json
 import re
+import sys
 from pathlib import Path
 
-PROMPTS = Path(__file__).resolve().parent / "agents" / "prompts"
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+from judge import seal  # noqa: E402
+
+PROMPTS = ROOT / "crew" / "agents" / "prompts"
 
 
 def version(text: str) -> str:
@@ -20,7 +27,7 @@ def version(text: str) -> str:
 def effective(data: Path | None) -> dict[str, str]:
     """Agent -> prompt text: the owner's applied change in ``data`` when there is one, else the repo's."""
     pick = lambda md: o if data and (o := Path(data) / "prompts" / md.name).is_file() else md  # noqa: E731
-    return {md.stem: pick(md).read_text(encoding="utf-8").rstrip("\n") for md in sorted(PROMPTS.glob("*.md"))}
+    return {md.stem: seal.read_text(pick(md)).rstrip("\n") for md in sorted(PROMPTS.glob("*.md"))}
 
 
 def versions(texts: dict[str, str]) -> dict[str, str]:
@@ -32,8 +39,8 @@ def bank(data: Path) -> list[dict]:
     rows = []
     for path in sorted(Path(data).glob("exams/**/*.json")) + sorted(Path(data).glob("rounds/*/exams/**/*.json")):
         try:
-            rows.append(json.loads(path.read_text(encoding="utf-8")))
-        except (OSError, ValueError):
+            rows.append(seal.read_json(path))
+        except (OSError, ValueError, seal.SealError):
             continue
     return [r for r in rows if isinstance(r, dict) and isinstance(r.get("id"), str)]
 
@@ -53,8 +60,7 @@ def apply(data: Path, agent: str, text: str, change_id: str) -> dict:
         raise ValueError(f"no such agent: {agent}")
     if found := leaks(text, bank(data)):
         raise ValueError(f"prompt names {len(found)} exam(s); exams never go into prompts")
-    (Path(data) / "prompts").mkdir(parents=True, exist_ok=True)
-    (Path(data) / "prompts" / f"{agent}.md").write_text(text.rstrip("\n") + "\n", encoding="utf-8")
+    seal.write_text(Path(data) / "prompts" / f"{agent}.md", text.rstrip("\n") + "\n")
     row = {"agent": agent, "version": version(text), "from": version(old[agent]), "change_id": change_id,
            "at": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")}
     with (Path(data) / "prompt_versions.jsonl").open("a", encoding="utf-8") as fh:

@@ -15,7 +15,7 @@ starts ``python -m backend.autoscore`` (single-flight; the tick does when scorin
 records the owner's choice, and 做 applies the change (``backend.prompt_changes``).
 ``/dispatch``: the owner's opt-in auto-dispatch (``backend.dispatch``, off by default); when on, 做 on a
 proposal card opens one worker chat for it. A prompt-change card never dispatches.
-No startup hook, no timer in the gateway.
+No timer in the gateway; loading the routes seals the data dir once (``judge.seal.migrate``, idempotent).
 """
 
 import asyncio
@@ -36,6 +36,7 @@ except ImportError:  # tests and the CLI import ``backend`` as a top-level packa
     import adapters.slack
 
 from . import dispatch, ledger, prompt_changes, round_job, schedule, settings, store
+from .ledger import seal
 
 APP_NAME = "harness-rsi"
 MAX_BODY = 2 * 1024 * 1024
@@ -221,8 +222,8 @@ def start_score(kc):
 
 async def _outcomes(request, ctx):
     score = {k: v for k, v in SCORE.items() if k != "task"}
-    outcomes, sent = await asyncio.to_thread(lambda: (ledger.rows(), dispatch.rows()))
-    return web.json_response({"ok": True, "outcomes": outcomes, "score": score, "dispatches": sent})
+    outcomes, sent, seen = await asyncio.to_thread(lambda: (ledger.rows(), dispatch.rows(), ledger.integrity()))
+    return web.json_response({"ok": True, "outcomes": outcomes, "score": score, "dispatches": sent, **seen})
 
 
 async def _link(request, ctx):
@@ -248,13 +249,13 @@ async def _score_post(request, ctx):
 
 
 def regress_runs():
-    """Stored post-merge regression runs, newest first; an unreadable file is left out."""
+    """Stored post-merge regression runs, newest first; an unreadable or unsigned file is left out."""
     runs = []
     for path in (store.data_dir() / "regress").glob("*.json"):
         try:
-            r = json.loads(path.read_text(encoding="utf-8"))
+            r = seal.read_run(path)
             runs.append({**{k: r[k] for k in ("sha", "at", "baseline", "counts", "regressions")}, "errors": r.get("errors", [])})
-        except (OSError, ValueError, KeyError, TypeError):
+        except (KeyError, TypeError):  # None: unsigned or tampered
             continue
     return sorted(runs, key=lambda r: r["at"], reverse=True)
 
@@ -341,8 +342,13 @@ async def _prompt_decide(request, ctx):
 
 
 def register_routes(ctx):
-    """Named by ``backend.hooks.routes``; the host calls it only for an enabled app."""
+    """Named by ``backend.hooks.routes``; the host calls it only for an enabled app. Seals the data dir once (idempotent)."""
     from kiro_crew.apps.route_registry import AppRoute
+
+    try:
+        seal.migrate()
+    except (seal.SealError, OSError, ValueError) as exc:  # the store stays as it was; reads still fail closed
+        print(f"harness-rsi: seal migrate failed: {type(exc).__name__}", file=sys.stderr)
 
     return [
         AppRoute(method="GET", path="/signals", handler=_signals),

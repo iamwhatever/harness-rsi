@@ -42,9 +42,10 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "crew"))
 import enrich  # noqa: E402
 import prior_art  # noqa: E402
-import prompts  # noqa: E402
+import prompts  # noqa: E402  (puts the repo root on the path)
 import reduce  # noqa: E402
 import target_facts  # noqa: E402
+from judge import seal  # noqa: E402
 
 Agent = Callable[[str, str], str]  # (agent name, task message) -> reply text
 Checker = Callable[[dict, list], "tuple[bool, str]"]  # (exam, signal pain) -> (runnable, reason): a dry run
@@ -241,7 +242,7 @@ def publish(exams: list[dict], bank: Path, classify: Classifier, context: dict |
             continue
         target = hidden if status == "runnable" else rejected
         target.mkdir(parents=True, exist_ok=True)
-        (target / f"{x['id']}.json").write_text(json.dumps(x, indent=2) + "\n")
+        seal.write_text(target / f"{x['id']}.json", json.dumps(x, indent=2) + "\n")
         have.add(x["id"])
         if status == "runnable":
             out["published"] += 1
@@ -259,7 +260,7 @@ def publish_round(round_dir: Path, bank: Path, classify: Classifier) -> dict:
     src = round_dir / "exams" / "hidden"
     if src.resolve() == (bank / "hidden").resolve():
         return {"published": 0, "rejected": 0, "held": 0, "skipped": 0, "notes": ["round dir is the bank"]}
-    exams = [json.loads(p.read_text()) for p in sorted(src.glob("*.json"))]
+    exams = [seal.read_json(p) for p in sorted(src.glob("*.json"))]
     sig = round_dir / "signals.jsonl"
     signals = [json.loads(line) for line in sig.read_text().splitlines() if line.strip()] if sig.is_file() else []
     props = json.loads((round_dir / "proposals.json").read_text()) if (round_dir / "proposals.json").is_file() else []
@@ -324,9 +325,8 @@ def run_round(*, agent: Agent, collectors: list[Callable[[], list[dict]]], save_
         slug = f"rsi-r{rnd}-{p['id'][5:].replace('_', '-')}"
         page = render_mock(p, exams, transcript.get("prior_art", {}).get(p["id"]))
         p["mock_artifact_slug"] = save_mock(slug, f"RSI mock: {p['pain'][:60]}", page)
-    (data / "exams" / "hidden").mkdir(parents=True, exist_ok=True)
     for x in exams:
-        (data / "exams" / "hidden" / f"{x['id']}.json").write_text(json.dumps(x, indent=2) + "\n")
+        seal.write_text(data / "exams" / "hidden" / f"{x['id']}.json", json.dumps(x, indent=2) + "\n")
     (data / "signals.jsonl").write_text("".join(json.dumps(s) + "\n" for s in signals))
     (data / "proposals.json").write_text(json.dumps(props, indent=2) + "\n")
     used = prompts.versions(prompts.effective(data))  # which prompt text each agent ran

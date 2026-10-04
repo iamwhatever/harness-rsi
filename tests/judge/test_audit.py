@@ -6,7 +6,7 @@ import pathlib
 import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
-from judge import audit  # noqa: E402
+from judge import audit, seal  # noqa: E402
 
 OK = {"kind": "exit_code", "cmd": ["true"], "expect": 0}
 SHOT = {"kind": "screenshot_diff", "baseline": "b/x.png", "max_diff_ratio": 0.1}
@@ -68,7 +68,7 @@ def test_screenshot_label_exam_becomes_dom_assert_only_when_clear_and_runnable(t
                  ("two", SHOT, 'Labels "A" and "B" on `.x`.'))
     s = audit.audit(root, tmp_path, fix=True, runner=fake({"screenshot_diff": MISSING_IMAGE, "dom_assert": (0, "ok")}))
     assert (s["converted"], s["runnable"], s["rejected"]) == (1, 1, {"missing-image": 1})
-    check = json.loads((root / "hidden/exam_chip.json").read_text(encoding="utf-8"))["check"]
+    check = seal.read_json(root / "hidden/exam_chip.json")["check"]
     assert check == {"kind": "dom_assert", "root": "website/dist", "path": "/", "selector": "[data-testid=model-chip]", "text": "Auto"}
     root = store(tmp_path / "b", ("cant", SHOT, '`#x` reads "Y"'))
     s = audit.audit(root, tmp_path, runner=fake({"screenshot_diff": MISSING_IMAGE, "dom_assert": (1, "missing file q")}))

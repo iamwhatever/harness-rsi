@@ -11,7 +11,7 @@ from jsonschema import Draft202012Validator
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 from backend import routes  # noqa: E402
-from judge import regress  # noqa: E402
+from judge import regress, seal  # noqa: E402
 
 _JUDGE = json.loads((ROOT / "schemas/judge.schema.json").read_text(encoding="utf-8"))
 OUTPUT = Draft202012Validator({"$ref": "#/$defs/output", "$defs": _JUDGE["$defs"]})
@@ -105,6 +105,6 @@ def test_promote_moves_a_used_hidden_exam_and_refuses_an_unused_one(tmp_path, mo
     assert regress.main(["promote", "exam_fresh"], io.StringIO()) == 2
     assert "not been used" in capsys.readouterr().err
     assert regress.main(["promote", "exam_used"], io.StringIO()) == 2  # already regression
-    doc = json.loads((tmp_path / "data/exams/hidden/set.json").read_text())
+    doc = seal.read_json(tmp_path / "data/exams/hidden/set.json")
     assert [e["visibility"] for e in doc] == ["regression", "hidden"]
     assert all(EXAM.is_valid(e) for e in doc)

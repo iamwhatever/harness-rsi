@@ -27,7 +27,7 @@ sys.path[:0] = [str(ROOT), str(ROOT / "crew")]
 import prompts  # noqa: E402
 import reduce  # noqa: E402
 import run_round as rr  # noqa: E402
-from judge import behaviour, core, png  # noqa: E402
+from judge import behaviour, core, png, seal  # noqa: E402
 
 Call = Callable[[str, str, str], "tuple[str, float | None]"]  # (agent, prompt text, message) -> (reply, credits)
 FLOOR = {"setter_hit_rate": 0.05, "adopt_rate": 0.05, "prior_art_fp_rate": 0.05}
@@ -37,6 +37,14 @@ URL = "https://github.com/kirodotdev/KiroCrew/pull/"
 
 def _jsonl(path: Path) -> list[dict]:
     return [json.loads(x) for x in path.read_text(encoding="utf-8").splitlines() if x.strip()] if path.is_file() else []
+
+
+def outcome_rows(data: Path) -> list[dict]:
+    """The signed outcome rows; ValueError when any line is unsigned or tampered, since every score read from it is void."""
+    rows, bad = seal.signed_lines(data / "outcomes.jsonl", seal.OUTCOMES)
+    if bad:
+        raise ValueError(f"outcome ledger has {bad} unsigned or tampered line(s); this round is void")
+    return rows
 
 
 def saved_rounds(data: Path, wanted: list[int]) -> dict[int, Path]:
@@ -52,7 +60,7 @@ def cards(data: Path) -> dict[str, dict]:
             for p in json.loads((d / "proposals.json").read_text(encoding="utf-8")):
                 out[p["id"]] = {"links": set().union(*(links.get(i, set()) for i in p["signal_ids"])),
                                 "decision": decided.get(p["id"], p.get("decision")), "merged": {}}
-    for r in _jsonl(data / "outcomes.jsonl"):
+    for r in outcome_rows(data):
         if r["card_id"] in out and r["state"] == "merged":
             out[r["card_id"]]["merged"][r["pr"]] = r  # the newest row per PR wins
     return out
@@ -134,9 +142,8 @@ def replay(data: Path, agent: str, texts: dict, call: Call, signals: list[dict],
             spent.append(credits)
             return reply
         got = turn(rr.SETTER, rr.setter_message(signals, rnd, facts)) if agent == rr.SETTER else rr.debate(turn, signals)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps({"reply": got, "credits": None if None in spent else sum(spent), "turns": len(spent)}))
-    return json.loads(path.read_text(encoding="utf-8"))
+        seal.write_text(path, json.dumps({"reply": got, "credits": None if None in spent else sum(spent), "turns": len(spent)}))
+    return seal.read_json(path)
 
 
 def run(data: Path, agent: str, variant: str, call: Call, trees: Callable, rounds: list[int], reps: int,
@@ -148,7 +155,7 @@ def run(data: Path, agent: str, variant: str, call: Call, trees: Callable, round
     deck, fx, samples, why = cards(data), fixes(data), {k: {} for k in arms}, {k: Counter() for k in arms}
     for rnd, d in saved_rounds(data, rounds).items():
         signals = _jsonl(d / "signals.jsonl")
-        exams = [json.loads(p.read_text(encoding="utf-8")) for p in sorted((d / "exams" / "hidden").glob("*.json"))]
+        exams = [seal.read_json(p) for p in sorted((d / "exams" / "hidden").glob("*.json"))]
         for arm, rep in ((a, r) for a in arms for r in range(reps)):
             got = replay(data, agent, arms[arm], call, signals, rnd, rep, facts(signals) if facts else "")
             hit, c = setter_sample(got["reply"], signals, rnd, fx, trees) if agent == rr.SETTER else (None, Counter())
