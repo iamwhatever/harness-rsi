@@ -70,11 +70,11 @@ def _data(tmp_path, hidden_text):
     return data
 
 
-def test_break_probe_breaks_today_and_never_touches_the_source(tmp_path, capsys):
+def test_break_probe_rejects_forged_scores_and_never_touches_the_source(tmp_path, capsys):
     data = _data(tmp_path, json.dumps({"id": "exam_x", "check": {"kind": "exit_code"}}))
     before = {p: p.read_bytes() for p in data.rglob("*") if p.is_file()}
     results = {name: verdict for name, verdict, _ in break_probe.run(data)}
-    assert results == {"forge-write": "BROKEN", "forge-accepted": "BROKEN", "hidden-read": "BROKEN"}
+    assert results == {"forge-write": "BROKEN", "forge-accepted": "SEALED", "hidden-read": "BROKEN"}
     assert {p: p.read_bytes() for p in data.rglob("*") if p.is_file()} == before
     assert break_probe.main(["--data", str(data)]) == 1
     assert "exit_code" not in capsys.readouterr().out
