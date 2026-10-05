@@ -38,6 +38,8 @@ export function backendSource(api) {
     decidePrompt: async (id, decision) => (await api.post(`${BASE}/prompt-changes/decide`, { id, decision })).change,
     dispatchConf: async () => (await api.get(`${BASE}/dispatch`)).dispatch,
     saveDispatch: async (conf) => (await api.post(`${BASE}/dispatch`, conf)).dispatch,
+    // The owner's Dispatch button: { results: one per id, dispatches: every card's current row }.
+    dispatchCards: (ids) => api.post(`${BASE}/dispatch/start`, { proposal_ids: ids }),
     team: async () => (await api.get(`${BASE}/team`)).team,
   }
 }
@@ -109,6 +111,26 @@ export function DispatchLine({ row: d }) {
     : h('a', { href: `/chat?slot=${encodeURIComponent(d.session)}`, className: 'text-accent hover:underline' }, t('dispChat', { s: d.session })))
 }
 
+/** A card may be dispatched by hand: decided Do, and no chat is opening or open for it. */
+export const dispatchable = (p, row) => p.decision === 'do' && (!row || row.state === 'error')
+const chatLink = (s) => h('a', { href: `/chat?slot=${encodeURIComponent(s)}`, className: 'text-accent hover:underline' }, t('dispChat', { s }))
+/** The answer to the last Dispatch click on this card, shown in place of its stored line. */
+export function DispatchResult({ result: r }) {
+  if (!r) return null
+  const bad = r.result === 'error'
+  const body = r.result === 'started' ? [t('dispStarted'), ' ', chatLink(r.session)]
+    : r.result === 'already' ? (r.session ? [t('dispAlready'), ' ', chatLink(r.session)] : [t('dispAlreadyOpening')])
+      : r.result === 'over_cap' ? [t('dispOverCap')] : r.result === 'not_do' ? [t('dispNotDo')] : [t('dispNotStarted', { e: r.reason })]
+  return h('div', { 'data-testid': 'dispatch-result', 'data-result': r.result, role: bad ? 'alert' : undefined,
+    className: bad ? 'text-[13px] text-danger mt-2' : `${MUTED} mt-2` }, ...body)
+}
+/** The Dispatch button and the board's check box, for a card that may be dispatched by hand. */
+const DispatchPick = ({ p, selected, onSelect, onDispatch }) => h('div', { className: 'flex flex-wrap items-center gap-3 mt-2' },
+  h('label', { className: `${MUTED} flex items-center gap-1.5` },
+    h('input', { type: 'checkbox', 'data-testid': 'dispatch-pick', checked: !!selected, 'aria-label': t('dispPick', { pain: p.pain }),
+      onChange: (e) => onSelect?.(p.id, !!e?.target?.checked) }), t('dispSelect')),
+  h(UI.Btn, { type: 'button', 'data-testid': 'dispatch-btn', onClick: () => onDispatch([p.id]) }, t('dispBtn')))
+
 const at = (s) => (s ? new Date(s).toLocaleString(getLang(), { dateStyle: 'short', timeStyle: 'short', hourCycle: 'h23' }) : '')
 /** One line of result for a run record. */
 export const runResult = (r) => (r.error ? t('runFailed', { e: r.error }) : r.kind === 'round' ? t('runCards', { cards: r.cards, signals: r.signals })
@@ -166,7 +188,7 @@ const Decide = ({ value, label, onDecide }) => h('div', { role: 'group', 'aria-l
   h('span', { className: MUTED, 'aria-live': 'polite' }, value ? t('decided', { d: t(`dec_${value}`) }) : t('undecided')))
 
 /** One proposal: title, heat, sources, before/after, cost, prior art, exams, score, decision. */
-export function ProposalCard({ proposal: p, before, onDecide, outcomes, onLink, dispatch, signals = [] }) {
+export function ProposalCard({ proposal: p, before, onDecide, outcomes, onLink, dispatch, signals = [], onDispatch, result, selected, onSelect }) {
   const titleId = `pain-${p.id}`
   const slug = p.mock_artifact_slug
   const srcs = signals.filter((s) => p.signal_ids.includes(s.id))
@@ -191,7 +213,8 @@ export function ProposalCard({ proposal: p, before, onDecide, outcomes, onLink, 
       h(Section, { title: t('secExams') }, h('div', { className: 'flex flex-wrap gap-1.5' }, p.exam_ids.map((e) => h(UI.Badge, { key: e, variant: 'muted' }, e)))),
       outcomes || onLink ? h(Outcomes, { proposal: p, outcomes: outcomes || [], onLink }) : null),
     h(Decide, { value: p.decision, label: t('decAria', { pain: p.pain }), onDecide: (d) => onDecide(p.id, d) }),
-    h(DispatchLine, { row: dispatch }))
+    onDispatch && dispatchable(p, dispatch) ? h(DispatchPick, { p, selected, onSelect, onDispatch }) : null,
+    result ? h(DispatchResult, { result }) : h(DispatchLine, { row: dispatch }))
 }
 
 const VERDICT = { better: 'ok', worse: 'err', same: 'muted' }
@@ -215,10 +238,17 @@ export function PromptChangeCard({ change: c, onDecide }) {
 
 const empty = (icon, key) => h(UI.EmptyState, { icon: h(icon, { size: 28 }), title: t(key), subtitle: t('emptyHint') })
 const stack = (...c) => h('div', { className: 'flex flex-col gap-3' }, ...c)
-export function Board({ proposals, images = {}, onDecide, outcomes, onLink, dispatches = [], signals = [] }) {
+export function Board({ proposals, images = {}, onDecide, outcomes, onLink, dispatches = [], signals = [], onDispatch, results = {}, selected = [], onSelect }) {
   if (!proposals.length) return empty(Inbox, 'noProposals')
-  return stack(byHeat(proposals).map((p) => h(ProposalCard, { key: p.id, proposal: p, before: images[p.id]?.before, onDecide, signals,
-    outcomes: outcomes && outcomes.filter((o) => o.card_id === p.id), onLink, dispatch: dispatches.find((d) => d.card_id === p.id) })))
+  const row = (p) => dispatches.find((d) => d.card_id === p.id)
+  const ready = byHeat(proposals).filter((p) => dispatchable(p, row(p))).map((p) => p.id)
+  const picked = selected.filter((id) => ready.includes(id))
+  const bar = onDispatch ? h('div', { key: 'dispatch-bar', className: 'flex flex-wrap items-center gap-2', 'data-testid': 'dispatch-bar' },
+    h(UI.Btn, { type: 'button', primary: true, disabled: !picked.length, 'data-testid': 'dispatch-selected', onClick: () => onDispatch(picked) }, t('dispSelected', { n: picked.length })),
+    h(UI.Btn, { type: 'button', disabled: !ready.length, 'data-testid': 'dispatch-all', onClick: () => onDispatch(ready) }, t('dispAllDo'))) : null
+  return stack(bar, byHeat(proposals).map((p) => h(ProposalCard, { key: p.id, proposal: p, before: images[p.id]?.before, onDecide, signals,
+    outcomes: outcomes && outcomes.filter((o) => o.card_id === p.id), onLink, dispatch: row(p),
+    onDispatch, result: results[p.id], selected: selected.includes(p.id), onSelect })))
 }
 
 export function Signals({ signals }) {
@@ -346,6 +376,8 @@ export function HarnessRsi({ src, demo = false }) {
   const [[sched, schedNote], setSched] = useState([null, ''])
   useEffect(() => { src.schedule().then((v) => setSched([v, '']), () => {}) }, [src])
   const [[disp, dispNote], setDisp] = useState([null, ''])
+  const [results, setResults] = useState({})
+  const [selected, setSelected] = useState([])
   useEffect(() => { src.dispatchConf().then((v) => setDisp([v, '']), () => {}) }, [src])
   const failed = (key) => (e) => setNote(t(key, { e: why(e) })), notSaved = (e) => t('notSaved', { e: why(e) })
   const save = () => src.saveSettings(form).then((v) => setForm([toForm(v), t('saved')]), (e) => setForm([form, notSaved(e)]))
@@ -355,8 +387,21 @@ export function HarnessRsi({ src, demo = false }) {
   // The card shows the choice at once; the reload then shows what decisions.jsonl holds.
   const decide = (id, decision) => {
     setState(([d]) => [{ ...d, proposals: applyDecision(d.proposals, id, decision) }, ''])
-    Promise.resolve(src.decide(id, decision)).then(() => { setNote(t('savedDecision', { d: t(`dec_${decision}`) })); reload(); src.outcomes().then(setOut, () => {}) },
+    setResults(({ [id]: _, ...rest }) => rest)
+    const idle = decision === 'do' && disp && !disp.auto_dispatch  // Do alone starts nothing: say how to start it
+    Promise.resolve(src.decide(id, decision)).then(() => { setNote(idle ? t('savedNotStarted') : t('savedDecision', { d: t(`dec_${decision}`) })); reload(); src.outcomes().then(setOut, () => {}) },
       (e) => { failed('decideFailed')(e); reload() })
+  }
+  const select = (id, on) => setSelected((xs) => (on ? [...new Set([...xs, id])] : xs.filter((x) => x !== id)))
+  const dispatchCards = (ids) => {
+    if (!ids.length) return
+    setNote(t('dispatching', { n: ids.length }))
+    src.dispatchCards(ids).then((r) => {
+      setResults((old) => ({ ...old, ...Object.fromEntries(r.results.map((x) => [x.id, x])) }))
+      setSelected((xs) => xs.filter((x) => !ids.includes(x)))
+      setNote(t('dispatched', { n: r.results.filter((x) => x.result === 'started').length, total: r.results.length }))
+      src.outcomes().then(setOut, () => {})
+    }, failed('dispatchFailed'))
   }
   const decidePrompt = (id, decision) => src.decidePrompt(id, decision)
     .then(() => { setNote(t(decision === 'do' ? 'pcDone' : 'saved')); src.promptChanges().then(setChanges, () => {}) }, failed('pcFailed'))
@@ -374,7 +419,8 @@ export function HarnessRsi({ src, demo = false }) {
   const pending = (data?.proposals || []).filter((p) => !p.decision).length
   const panels = {
     board: () => [toolbar(h(UI.Btn, { type: 'button', onClick: score, disabled: scoreRunning(out) }, t('scorePrs')), h('span', { className: MUTED, 'data-testid': 'score-job' }, scoreJobText(out?.score))),
-      h(Board, { proposals: data.proposals, images: data.images, signals: data.signals, onDecide: decide, outcomes: out?.outcomes, onLink: linkPr, dispatches: out?.dispatches })],
+      h(Board, { proposals: data.proposals, images: data.images, signals: data.signals, onDecide: decide, outcomes: out?.outcomes, onLink: linkPr, dispatches: out?.dispatches,
+        onDispatch: dispatchCards, results, selected, onSelect: select })],
     signals: () => [toolbar(h(UI.Btn, { type: 'button', onClick: refresh }, t('refresh')), h('span', { className: MUTED, 'data-testid': 'github-job' }, jobText(job))),
       form && !form.saved.command_set ? h('div', { key: 's', className: `${MUTED} mb-3`, 'data-testid': 'slack-off' }, slackNote(null)) : null,
       h(Signals, { signals: data.signals })],

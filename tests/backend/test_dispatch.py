@@ -139,3 +139,73 @@ def test_the_seed_carries_the_card_signals_prior_art_and_rules(opened, tmp_path)
     for part in (p["id"], p["pain"], sig["pain"], "#42 CLOSED: An earlier try", "10 files and 300 lines",
                  "one small PR, drive CI green, do not merge", f"Put {p['id']} in the PR body"):
         assert part in text, part
+
+
+# Manual dispatch: POST /dispatch/start, whatever auto_dispatch says.
+DO, LATER, FRESH = "prop_plain_errors", "prop_one_step_undo", "prop_bg_tasks"  # fixture decisions: do, later, none
+
+
+def start(*ids, req=Sock):
+    return call(routes._dispatch_start, req({"proposal_ids": list(ids)}))
+
+
+def test_dispatch_starts_a_do_card_with_auto_dispatch_off(opened, tmp_path):
+    assert dispatch.read()["auto_dispatch"] is False
+    status, body = start(DO)
+    [r] = body["results"]
+    assert status == 200 and r["result"] == "started" and len(opened) == 1
+    assert r["session"] == opened[0]["name"] and r["link"] == f"/chat?slot={opened[0]['name']}"
+    assert body["dispatches"] == [r["row"]] and r["row"]["state"] == "dispatched"
+
+
+def test_dispatch_is_idempotent_per_card(opened, monkeypatch):
+    first = start(DO)[1]["results"][0]
+    again = start(DO, DO)[1]["results"]
+    assert len(again) == 1 and again[0]["result"] == "already" and again[0]["row"] == first["row"]
+    assert again[0]["link"] == first["link"] and len(opened) == 1
+    turn(monkeypatch, ON)  # auto-dispatch on top of a manual one: still one chat
+    assert do(DO)[1]["dispatch"] == first["row"] and len(opened) == 1
+
+
+def test_dispatch_refuses_a_card_not_decided_do(opened):
+    body = start(LATER, FRESH, "prop_nope")[1]
+    assert [(r["id"], r["result"]) for r in body["results"]] == [(LATER, "not_do"), (FRESH, "not_do"), ("prop_nope", "error")]
+    assert opened == [] and body["dispatches"] == []
+
+
+def test_dispatch_honors_the_daily_cap_and_writes_no_refusal_row(opened, monkeypatch, tmp_path):
+    turn(monkeypatch, {**dispatch.DEFAULTS, "daily_cap": 1})
+    do(FRESH)  # auto off: decided, not started
+    results = start(DO, FRESH)[1]["results"]
+    assert [r["result"] for r in results] == ["started", "over_cap"] and results[1]["reason"] == "waiting for tomorrow"
+    assert len(opened) == 1 and dispatch.current(FRESH) is None
+
+
+def test_dispatch_obeys_the_allowlist(opened, monkeypatch):
+    turn(monkeypatch, {**dispatch.DEFAULTS, "repos": ["someone/else"]})
+    [r] = start(DO)[1]["results"]
+    assert r["result"] == "error" and "not on the allowlist" in r["reason"] and opened == [] and dispatch.current(DO) is None
+
+
+def test_a_failed_open_is_an_error_result_and_may_retry(opened, monkeypatch):
+    async def down(*a):
+        raise ConnectionError("gateway refused")
+
+    monkeypatch.setattr(dispatch, "open_chat", down)
+    [r] = start(DO)[1]["results"]
+    assert r["result"] == "error" and r["reason"] == "ConnectionError: gateway refused" and dispatch.current(DO)["state"] == "error"
+    monkeypatch.setattr(dispatch, "open_chat", lambda *a: _done("rsi-retry"))
+    assert start(DO)[1]["results"][0]["session"] == "rsi-retry"
+
+
+def test_dispatch_is_owner_only_and_validates_the_body(opened):
+    assert start(DO, req=lambda b: Req(b, internal_auth=True))[0] == 403
+    for bad in ({}, {"proposal_ids": []}, {"proposal_ids": "x"}, {"proposal_ids": [1]}, {"proposal_ids": ["p"] * 51}):
+        assert call(routes._dispatch_start, Sock(bad))[0] == 400, bad
+    assert opened == []
+
+
+def test_auto_dispatch_off_still_starts_nothing_on_do(opened, tmp_path):
+    status, body = do(DO)
+    assert status == 200 and "dispatch" not in body
+    assert opened == [] and not (tmp_path / dispatch.FILE).exists()

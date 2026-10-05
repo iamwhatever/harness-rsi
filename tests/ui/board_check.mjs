@@ -223,4 +223,54 @@ const failedLine = expand(ui.DispatchLine({ row: { ...sentRow, state: 'error', s
 assert.equal(failedLine[0].props.role, 'alert')
 assert.equal(text(failedLine[0]), 'Dispatch failed: daily cap of 2 reached')
 assert.equal(ui.DispatchLine({ row: undefined }), null)
+// Manual dispatch: the source posts the ids; only a Do card with no live chat gets a check box and a Dispatch button.
+const mposts = []
+const mapi = { post: async (p, b) => { mposts.push([p, b]); return { results: [], dispatches: [] } } }
+await ui.backendSource(mapi).dispatchCards(['prop_plain_errors'])
+assert.deepEqual(mposts, [['/api/apps/harness-rsi/dispatch/start', { proposal_ids: ['prop_plain_errors'] }]])
+const doIds = proposals.filter((p) => p.decision === 'do').map((p) => p.id)
+assert.ok(doIds.length >= 1 && doIds.length < proposals.length, 'the fixtures hold Do and other cards')
+const fired = [], picks = []
+const mtree = (props) => expand(ui.Board({ proposals, onDecide() {}, onDispatch: (ids) => fired.push(ids), onSelect: (id, on) => picks.push([id, on]), ...props }))
+const mt = mtree({})
+const btnCards = find(mt, (n) => n.props['data-testid'] === 'proposal-card' && find([n], (x) => x.props['data-testid'] === 'dispatch-btn').length)
+assert.deepEqual(btnCards.map((c) => c.props['data-id']).sort(), [...doIds].sort())
+for (const c of btnCards) {
+  assert.deepEqual(find([c], (n) => n.type === 'button').map(text), ['Do', 'Skip', 'Later', 'Dispatch'])
+  const box = find([c], (n) => n.props['data-testid'] === 'dispatch-pick')[0]
+  assert.equal(box.props.type, 'checkbox')
+  assert.match(box.props['aria-label'], /^Select for dispatch: /)
+  box.props.onChange({ target: { checked: true } })
+  find([c], (n) => n.props['data-testid'] === 'dispatch-btn')[0].props.onClick()
+}
+const bySel = (tree) => find(tree, (n) => n.props['data-testid'] === 'dispatch-selected')[0]
+const byAll = (tree) => find(tree, (n) => n.props['data-testid'] === 'dispatch-all')[0]
+assert.equal(text(bySel(mt)), 'Dispatch selected (0)')
+assert.equal(bySel(mt).props.disabled, true)
+assert.equal(text(byAll(mt)), 'Dispatch all Do')
+byAll(mt).props.onClick()
+const withSel = mtree({ selected: [doIds[0], 'prop_one_step_undo'] })  // a non-Do id never rides along
+assert.equal(text(bySel(withSel)), 'Dispatch selected (1)')
+bySel(withSel).props.onClick()
+assert.deepEqual(picks, doIds.map((id) => [id, true]))
+assert.deepEqual(fired, [...doIds.map((id) => [id]), ui.byHeat(proposals).filter((p) => p.decision === 'do').map((p) => p.id), [doIds[0]]])
+// A live row hides the button; an error row offers it again; no onDispatch, no bar.
+const live = mtree({ dispatches: [{ card_id: doIds[0], state: 'dispatched', session: 's1', error: '' }] })
+assert.equal(find(live, (n) => n.props['data-testid'] === 'dispatch-btn').length, doIds.length - 1)
+assert.equal(byAll(live).props.disabled, doIds.length === 1)
+assert.ok(ui.dispatchable({ decision: 'do' }, { state: 'error' }) && !ui.dispatchable({ decision: 'do' }, { state: 'pending' }) && !ui.dispatchable({ decision: 'later' }))
+assert.equal(find(expand(ui.Board({ proposals, onDecide() {} })), (n) => n.props['data-testid'] === 'dispatch-bar').length, 0)
+// Each result reads plainly on its card; started and already link the worker chat.
+const res = (r) => expand(ui.DispatchResult({ result: { id: 'x', ...r } }))[0]
+assert.equal(text(res({ result: 'started', session: 'rsi-a' })), 'Started. Worker chat: rsi-a')
+assert.equal(find([res({ result: 'started', session: 'rsi a' })], (n) => n.type === 'a')[0].props.href, '/chat?slot=rsi%20a')
+assert.equal(text(res({ result: 'already', session: 'rsi-a' })), 'Already dispatched. Worker chat: rsi-a')
+assert.equal(text(res({ result: 'already', session: null })), 'Already dispatched: opening a worker chat…')
+assert.equal(text(res({ result: 'over_cap' })), 'Waiting for tomorrow: the daily cap is reached.')
+assert.equal(text(res({ result: 'not_do' })), 'Not started: decide Do first.')
+assert.equal(res({ result: 'error', reason: 'boom' }).props.role, 'alert')
+assert.equal(text(res({ result: 'error', reason: 'boom' })), 'Not started: boom')
+const shownRes = expand(ui.ProposalCard({ proposal: proposals[0], onDecide() {}, dispatch: { state: 'error', error: 'old' }, result: { id: 'x', result: 'over_cap' } }))
+assert.equal(find(shownRes, (n) => n.props['data-testid'] === 'dispatch-line').length, 0, 'the click result replaces the stored line')
+assert.equal(ui.DispatchResult({ result: undefined }), null)
 console.log('board ok')
