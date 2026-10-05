@@ -1,6 +1,7 @@
 """Harness RSI app page: opt-in manifest, fake data = fixtures, board behaviour (node)."""
 
 import json
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -74,3 +75,16 @@ def test_no_motion_of_our_own():
     """Motion comes only from host components, which honour prefers-reduced-motion."""
     src = (ROOT / "ui" / "index.mjs").read_text(encoding="utf-8")
     assert not any(w in src for w in ("animate-", "transition", "@keyframes", "animation"))
+
+
+def test_ui_names_only_the_lucide_icons_the_host_stub_exports():
+    """The host's lucide-react stub names a short list (copied into fakes/lucide-react.mjs); other icons need the default export."""
+    fake = (HERE / "fakes" / "lucide-react.mjs").read_text(encoding="utf-8")
+    host = set(re.findall(r"\w+", re.search(r"export const \{(.*?)\}", fake, re.S).group(1)))
+    assert {"Users", "Wand2", "Zap"} <= host and "History" not in host
+    for f in sorted((ROOT / "ui").rglob("*.mjs")):
+        if "screenshots" in f.parts:
+            continue  # the screenshot rig loads the real npm package, not the host stub
+        for names in re.findall(r"import\s*(?:\w+\s*,\s*)?\{([^}]*)\}\s*from\s*['\"]lucide-react['\"]", f.read_text(encoding="utf-8")):
+            missing = {n.split(" as ")[0].strip() for n in names.split(",") if n.strip()} - host
+            assert not missing, f"{f.name} imports {sorted(missing)} by name; read them from the default export"
