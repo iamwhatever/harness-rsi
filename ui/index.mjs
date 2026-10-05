@@ -4,10 +4,12 @@
 import { createElement as h, useCallback, useEffect, useMemo, useState } from 'react'
 import * as sdk from '@kirocrew/app-sdk'
 import * as UI from '@kirocrew/app-sdk/ui'
-import { History, Inbox, Radio, Users, Wand2 } from 'lucide-react'
+// The host's lucide-react stub names only a short list of icons; every other icon is on its default export.
+import Lucide from 'lucide-react'
 import { getLang, has, pickLang, setLang, t } from './strings.mjs'
 import { demoSource, isDemo } from './fake-data.mjs'
 
+const { History, Inbox, Radio, Users, Wand2 } = Lucide
 const BASE = '/api/apps/harness-rsi'
 
 /** The data source over the app backend. `load` answers { proposals, signals, images }

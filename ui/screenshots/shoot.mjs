@@ -26,6 +26,8 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'rsi-shoot-'))
 const before = `/@fs${path.join(repo, 'baseline/screenshots/chat.png')}`
 // The page body never calls the backend hook; the stub keeps the host SDK barrel out but gives the host locale.
 fs.writeFileSync(path.join(tmp, 'app-sdk.js'), "export const useAppApi = () => null\nexport { activeLocale } from '@host/i18n/format'\n")
+// The host hands apps lucide-react with every icon on a default export (vendor/lucide-react.mjs); the npm package has none.
+fs.writeFileSync(path.join(tmp, 'lucide-host.js'), `import * as m from '${path.join(nm, 'lucide-react')}'\nexport * from '${path.join(nm, 'lucide-react')}'\nexport default m\n`)
 fs.writeFileSync(path.join(tmp, 'harness.css'), '@import "@host/index.css";\n')
 fs.writeFileSync(path.join(tmp, 'index.html'),
   `<!doctype html><html lang="${LANG}"><body><div id="root"></div><script type="module" src="./main.jsx"></script></body></html>`)
@@ -52,7 +54,7 @@ const server = await createServer({
     { find: /^@kirocrew\/app-sdk\/ui$/, replacement: path.join(site, 'src/kirocrew-ui/index.ts') },
     { find: /^@kirocrew\/app-sdk$/, replacement: path.join(tmp, 'app-sdk.js') },
     { find: /^@host\//, replacement: path.join(site, 'src') + '/' },
-    ...alias('react', path.join(nm, 'react')), ...alias('react-dom', path.join(nm, 'react-dom')), ...alias('lucide-react', path.join(nm, 'lucide-react')),
+    ...alias('react', path.join(nm, 'react')), ...alias('react-dom', path.join(nm, 'react-dom')), { find: /^lucide-react$/, replacement: path.join(tmp, 'lucide-host.js') },
   ] },
   server: { port: 5291, strictPort: true, host: '127.0.0.1', fs: { allow: [repo, site, tmp] } },
 })
