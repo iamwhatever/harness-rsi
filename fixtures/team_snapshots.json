@@ -1,0 +1,142 @@
+[
+ {
+  "reporter": "chat-fake-lead",
+  "role": "lead",
+  "round": 5,
+  "goal": "Round 5: signals to cards to at most 2 PRs",
+  "received_at": "2026-01-06T09:05:00Z",
+  "items": [
+   {
+    "item_id": "it_00000001",
+    "title": "Find lane: round 5 signals",
+    "state": "open",
+    "status": "progress",
+    "summary": "",
+    "verdict": null,
+    "pr": null,
+    "worker_session_key": "chat-fake-lane-find",
+    "last_report_at": "2026-01-06T08:50:00Z",
+    "orphaned": false,
+    "stale": false
+   },
+   {
+    "item_id": "it_00000002",
+    "title": "Build lane: the cards you chose",
+    "state": "open",
+    "status": "progress",
+    "summary": "",
+    "verdict": null,
+    "pr": null,
+    "worker_session_key": "chat-fake-lane-build",
+    "last_report_at": "2026-01-06T08:50:00Z",
+    "orphaned": false,
+    "stale": false
+   },
+   {
+    "item_id": "it_00000003",
+    "title": "Exam lane: exam bank health",
+    "state": "open",
+    "status": "question",
+    "summary": "Two exams flake; retire them?",
+    "verdict": null,
+    "pr": null,
+    "worker_session_key": "chat-fake-lane-exam",
+    "last_report_at": "2026-01-06T08:50:00Z",
+    "orphaned": false,
+    "stale": false
+   }
+  ]
+ },
+ {
+  "reporter": "chat-fake-lane-find",
+  "role": "lane",
+  "round": 5,
+  "goal": "Signals for round 5",
+  "received_at": "2026-01-06T09:00:00Z",
+  "items": [
+   {
+    "item_id": "it_00000010",
+    "title": "Scout: Slack channels",
+    "state": "accepted",
+    "status": "done",
+    "summary": "",
+    "verdict": "pass",
+    "pr": null,
+    "worker_session_key": "chat-fake-w-slack",
+    "last_report_at": "2026-01-06T08:50:00Z",
+    "orphaned": false,
+    "stale": false
+   },
+   {
+    "item_id": "it_00000011",
+    "title": "Scout: GitHub issues",
+    "state": "open",
+    "status": "blocked",
+    "summary": "GitHub rate limit; retry after 10:00",
+    "verdict": null,
+    "pr": null,
+    "worker_session_key": "chat-fake-w-github",
+    "last_report_at": "2026-01-06T08:50:00Z",
+    "orphaned": false,
+    "stale": false
+   }
+  ]
+ },
+ {
+  "reporter": "chat-fake-lane-build",
+  "role": "lane",
+  "round": 5,
+  "goal": "One PR per chosen card",
+  "received_at": "2026-01-06T07:00:00Z",
+  "items": [
+   {
+    "item_id": "it_00000020",
+    "title": "Build: plain error text",
+    "state": "accepted",
+    "status": "done",
+    "summary": "",
+    "verdict": "pass",
+    "pr": 101,
+    "worker_session_key": "chat-fake-w-build-1",
+    "last_report_at": "2026-01-06T08:50:00Z",
+    "orphaned": false,
+    "stale": false
+   },
+   {
+    "item_id": "it_00000021",
+    "title": "Build: background task survives close",
+    "state": "open",
+    "status": "progress",
+    "summary": "",
+    "verdict": null,
+    "pr": null,
+    "worker_session_key": "chat-fake-w-build-2",
+    "last_report_at": "2026-01-06T08:50:00Z",
+    "orphaned": true,
+    "stale": false
+   }
+  ]
+ },
+ {
+  "reporter": "chat-fake-lane-old",
+  "role": "lane",
+  "round": 4,
+  "goal": "Round 4 prompt A/B",
+  "received_at": "2026-01-01T09:00:00Z",
+  "items": [
+   {
+    "item_id": "it_00000030",
+    "title": "Prompt A/B: question setter",
+    "state": "abandoned",
+    "status": "progress",
+    "summary": "",
+    "verdict": null,
+    "pr": null,
+    "worker_session_key": "chat-fake-w-ab",
+    "last_report_at": "2026-01-06T08:50:00Z",
+    "orphaned": false,
+    "stale": false
+   }
+  ]
+ }
+]

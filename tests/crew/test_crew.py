@@ -24,6 +24,8 @@ ROLES = {
     "rsi-question-setter": ("exam", set()),
     "rsi-prompt-proposer": (None, set()),  # replies with one prompt change, no row schema
 }
+# The lead and lane conductors the manifest ships; their tools are checked in tests/backend/test_team.py.
+CONDUCTORS = {"rsi-lead", *(f"rsi-lane-{x}" for x in ("find", "propose", "exam", "build", "prompt"))}
 # Tools that could write files, run code, push, merge, spawn, or reach Slack.
 FORBIDDEN_WORDS = ("write", "bash", "shell", "aws", "slack", "send", "post", "spawn", "session_send", "git", "merge")
 
@@ -44,8 +46,8 @@ def validator(name):
 
 
 def test_every_role_has_exactly_one_spec_and_prompt():
-    assert {p.stem for p in AGENTS.glob("*.json")} == set(ROLES)
-    assert {p.stem for p in (AGENTS / "prompts").glob("*.md")} == set(ROLES)
+    assert {p.stem for p in AGENTS.glob("*.json")} == set(ROLES) | CONDUCTORS
+    assert {p.stem for p in (AGENTS / "prompts").glob("*.md")} == set(ROLES) | CONDUCTORS
 
 
 def test_json_prompts_match_markdown_sources():

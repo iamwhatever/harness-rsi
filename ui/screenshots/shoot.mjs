@@ -59,7 +59,7 @@ const server = await createServer({
 await server.listen()
 const browser = await (pw.chromium || pw.default.chromium).launch({ executablePath: process.env.CHROMIUM_PATH || undefined })
 const errors = []
-const TABS = { en: ['Board', 'Signals', 'Rounds', 'Prompt changes', 'Settings'], zh: ['看板', '信号', '轮次', '提示词改动', '设置'] }[LANG]
+const TABS = { en: ['Board', 'Signals', 'Rounds', 'Prompt changes', 'Team', 'Settings'], zh: ['看板', '信号', '轮次', '提示词改动', '团队', '设置'] }[LANG]
 try {
   const page = await browser.newPage({ viewport: { width: W, height: 900 }, reducedMotion: 'reduce', locale: LANG === 'zh' ? 'zh-CN' : 'en-US' })
   page.on('pageerror', (e) => errors.push(e.message))
@@ -85,7 +85,7 @@ try {
   await page.waitForFunction(() => document.querySelector('[data-testid="proposal-card"] [data-decision="do"]')?.getAttribute('aria-pressed') === 'true')
     .catch(() => errors.push('Enter did not press Do'))
   await shoot('board')
-  for (const [i, name] of ['signals', 'rounds', 'prompts', 'settings'].entries()) {
+  for (const [i, name] of ['signals', 'rounds', 'prompts', 'team', 'settings'].entries()) {
     await page.getByRole('radio', { name: new RegExp(`^${TABS[i + 1]}`) }).click()
     await page.getByTestId(`panel-${name}`).waitFor()
     if (name === 'prompts') await page.getByTestId('prompt-change-card').locator('summary').click()
@@ -97,4 +97,4 @@ try {
   fs.rmSync(tmp, { recursive: true, force: true })
 }
 if (errors.length) { console.error(errors.join('\n')); process.exit(1) }
-console.log(`wrote 5 shots for ${LANG} at ${W}px to ${OUT}`)
+console.log(`wrote 6 shots for ${LANG} at ${W}px to ${OUT}`)
