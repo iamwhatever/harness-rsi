@@ -1,7 +1,8 @@
 """Auto-dispatch, off by default: the owner's 做 on a proposal card opens ONE worker chat that builds it.
 
 Settings (``auto_dispatch``, the target-repo allowlist, the daily cap) live in the vault; only the
-owner-only ``POST /dispatch`` writes them. A dispatch goes through the gateway's ordinary app API with
+owner-only ``POST /dispatch`` writes them. ``POST /dispatch/start`` is the owner's Dispatch button: it
+starts chosen 做 cards whatever ``auto_dispatch`` says, under the same allowlist, cap and single-flight. A dispatch goes through the gateway's ordinary app API with
 this app's own token: ``POST /api/apps/harness-rsi/token`` -> ``POST /api/chat/slots`` (an app-owned
 chat the owner sees in the sidebar) -> ``POST /api/chat`` with the seed; the turn runs on after the
 stream is closed. ``dispatches.jsonl`` holds one row per change; the newest per card is
@@ -15,6 +16,7 @@ import datetime as dt
 import json
 import re
 import threading
+import urllib.parse
 
 from . import prompt_changes, settings, store
 
@@ -72,24 +74,27 @@ def _put(row):
     return row
 
 
-def claim(card_id, conf, clock=now):
-    """``(row, started)``: a new ``pending`` row when this click may dispatch, else the card's row as it is.
+def claim(card_id, conf, clock=now, record=True):
+    """``(row, outcome)``: ``started`` with a new ``pending`` row when this click may dispatch, else why not.
 
-    Single-flight: a card whose row is pending or dispatched is returned unchanged. A refusal (repo not
-    allowlisted, daily cap) is an error row with no ``pending`` row before it, so it uses none of the cap."""
+    Single-flight: a card whose row is pending or dispatched is returned unchanged as ``already``. A
+    refusal (``not_allowed``: repo not allowlisted; ``over_cap``: daily cap) has no ``pending`` row
+    before it, so it uses none of the cap; it is written as an error row only when ``record``."""
     with _LOCK:
         old = current(card_id)
         if old and old["state"] in ("pending", "dispatched"):
-            return old, False
+            return old, "already"
         t = clock()
         day = t.date().isoformat()  # each attempt writes one pending row: that is what the cap counts
         today = sum(1 for r in store._jsonl(FILE) if isinstance(r, dict) and r.get("state") == "pending" and str(r.get("at", "")).startswith(day))
         row = {"card_id": card_id, "repo": TARGET, "state": "pending", "session": None, "error": "", "at": t.isoformat(timespec="seconds")}
         if TARGET not in conf["repos"]:
-            return _put({**row, "state": "error", "error": f"{TARGET} is not on the allowlist in Settings"}), False
+            bad = {**row, "state": "error", "error": f"{TARGET} is not on the allowlist in Settings"}
+            return (_put(bad) if record else bad), "not_allowed"
         if today >= conf["daily_cap"]:
-            return _put({**row, "state": "error", "error": f"daily cap of {conf['daily_cap']} reached; try tomorrow"}), False
-        return _put(row), True
+            bad = {**row, "state": "error", "error": f"daily cap of {conf['daily_cap']} reached; try tomorrow"}
+            return (_put(bad) if record else bad), "over_cap"
+        return _put(row), "started"
 
 
 def finish(row, session=None, error=""):
@@ -158,14 +163,8 @@ async def open_chat(base, name, title, text):
     return key
 
 
-async def on_do(request, card):
-    """Dispatch ``card`` when the owner turned this on; its dispatch row, or None when off."""
-    conf = await asyncio.to_thread(read)
-    if not conf["auto_dispatch"]:
-        return None
-    row, started = await asyncio.to_thread(claim, card["id"], conf)
-    if not started:
-        return row
+async def _open(request, card, row):
+    """Seed and open the worker chat for a claimed ``row``; the finished row (dispatched or error)."""
     try:
         text = await asyncio.to_thread(lambda: seed(card, store.read_signals(), prior_art(card["id"])))
         if not (base := base_url(request)):
@@ -175,3 +174,48 @@ async def on_do(request, card):
         return await asyncio.to_thread(finish, row, key)
     except Exception as exc:  # noqa: BLE001 - the card shows why; the decision itself stands
         return await asyncio.to_thread(finish, row, None, f"{type(exc).__name__}: {str(exc)[:150]}")
+
+
+async def on_do(request, card):
+    """Dispatch ``card`` when the owner turned this on; its dispatch row, or None when off."""
+    conf = await asyncio.to_thread(read)
+    if not conf["auto_dispatch"]:
+        return None
+    row, outcome = await asyncio.to_thread(claim, card["id"], conf)
+    return await _open(request, card, row) if outcome == "started" else row
+
+
+def chat_link(session):
+    return f"/chat?slot={urllib.parse.quote(session, safe='')}"
+
+
+async def start(request, card_ids):
+    """The owner's Dispatch button, whatever ``auto_dispatch`` says: one result per id, in order.
+
+    ``started`` (chat key + link), ``already`` (the live row), ``over_cap`` (waiting for tomorrow),
+    ``not_do`` (not decided do), ``error`` (reason). Same allowlist, cap and single-flight as on_do;
+    a refusal here writes no row, so the card keeps its last real state."""
+    conf = await asyncio.to_thread(read)
+    cards = {p["id"]: p for p in await asyncio.to_thread(store.read_proposals)}
+    out = []
+    for cid in card_ids:
+        card = cards.get(cid)
+        if card is None:
+            out.append({"id": cid, "result": "error", "reason": "no such proposal"})
+            continue
+        if card["decision"] != "do":
+            out.append({"id": cid, "result": "not_do", "reason": "decide Do first"})
+            continue
+        row, outcome = await asyncio.to_thread(claim, cid, conf, now, False)
+        if outcome == "already":
+            out.append({"id": cid, "result": "already", "row": row,
+                        **({"session": row["session"], "link": chat_link(row["session"])} if row.get("session") else {})})
+        elif outcome == "over_cap":
+            out.append({"id": cid, "result": "over_cap", "reason": "waiting for tomorrow"})
+        elif outcome == "not_allowed":
+            out.append({"id": cid, "result": "error", "reason": row["error"]})
+        else:
+            done = await _open(request, card, row)
+            out.append({"id": cid, "result": "error", "reason": done["error"], "row": done} if done["state"] == "error"
+                       else {"id": cid, "result": "started", "session": done["session"], "link": chat_link(done["session"]), "row": done})
+    return out

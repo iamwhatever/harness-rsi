@@ -23,12 +23,24 @@ const dispatch = { auto_dispatch: false, repos: ['example-org/example-repo'], da
 export function demoSource() {
   const ok = async (v) => v
   let rows = proposals
-  return { load: () => ok({ proposals: rows, signals, images: {} }), status: () => ok(job),
+  const sent = []  // FAKE dispatch rows: Dispatch opens no chat in demo mode
+  const dispatchCards = (ids) => ok({ results: ids.map((id) => {
+    const p = rows.find((x) => x.id === id)
+    const live = sent.find((d) => d.card_id === id)
+    if (!p) return { id, result: 'error', reason: 'no such proposal' }
+    if (p.decision !== 'do') return { id, result: 'not_do', reason: 'decide Do first' }
+    if (live) return { id, result: 'already', row: live, session: live.session }
+    if (sent.length >= dispatch.daily_cap) return { id, result: 'over_cap', reason: 'waiting for tomorrow' }
+    const row = { card_id: id, repo: dispatch.repos[0], state: 'dispatched', session: `rsi-demo-${sent.length + 1}`, error: '' }
+    sent.push(row)
+    return { id, result: 'started', session: row.session, row }
+  }), dispatches: sent })
+  return { load: () => ok({ proposals: rows, signals, images: {} }), status: () => ok(job), dispatchCards,
     decide: (id, decision) => { rows = rows.map((p) => (p.id === id ? { ...p, decision } : p)); return ok({ ok: true }) },
     round: () => ok({ running: false, round: 4, started_at: 1767603900, finished_at: 1767607500, counts: { signals: 10, proposals: 3 }, notes: [], error: '' }),
     runRound: () => ok({ running: false, round: 4, finished_at: null }), regress: () => ok(null),
     refresh: () => ok({ total: signals.length, added: 0, errors: [], github: job }), settings: () => ok(settings), saveSettings: () => ok(settings),
-    schedule: () => ok(schedule), saveSchedule: (c) => ok(c), outcomes: () => ok({ outcomes, dispatches: [], score: null }), link: () => ok({ ok: true }),
+    schedule: () => ok(schedule), saveSchedule: (c) => ok(c), outcomes: () => ok({ outcomes, dispatches: sent, score: null }), link: () => ok({ ok: true }),
     score: () => ok({ outcomes, dispatches: [], score: null }), promptChanges: () => ok([promptChange]), decidePrompt: () => ok(promptChange),
     dispatchConf: () => ok(dispatch), saveDispatch: (c) => ok(c), team: () => ok(team) }
 }

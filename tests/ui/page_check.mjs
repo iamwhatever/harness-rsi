@@ -45,6 +45,28 @@ assert.equal(byTest(demo.team, 'stale-reporter').length, 2)
 assert.ok(byTest(demo.team, 'session-link').every((a) => a.props.href.startsWith('/chat?slot=')))
 assert.ok(byTest(demo.board, 'score').length >= 1, 'demo cards show the fixture judge scores')
 assert.ok(byTest(demo.board, 'sources')[0].children.some((a) => a?.props?.href === signals[0].links[0]), 'a card links its signal source')
+// Demo Dispatch: Do with auto-dispatch off says how to start it; Dispatch all Do starts the Do cards inline, within the cap.
+{
+  const dsrc = demoSource()
+  const page2 = () => expand(h(HarnessRsi, { src: dsrc, demo: true }))
+  let tree = await __settle(page2, true)
+  const fresh = proposals.find((p) => !p.decision)
+  const card = byTest(tree, 'proposal-card').find((c) => c.props['data-id'] === fresh.id)
+  const doBtn = all([card]).find((n) => n.props['data-decision'] === 'do')
+  doBtn.props.onClick()
+  tree = await __settle(page2)
+  const noteText = (t) => byTest(t, 'note').map((n) => n.children.join('')).join('')
+  assert.equal(noteText(tree), 'Saved. Not started: use Dispatch or turn on auto-dispatch.')
+  const want = proposals.filter((p) => p.decision === 'do').length + 1
+  assert.equal(byTest(tree, 'dispatch-btn').length, want)
+  byTest(tree, 'dispatch-all')[0].props.onClick()
+  tree = await __settle(page2)
+  const got = byTest(tree, 'dispatch-result').map((n) => n.props['data-result'])
+  assert.deepEqual(got.sort(), ['started', 'started', ...Array(Math.max(0, want - 2)).fill('over_cap')].sort())
+  assert.ok(byTest(tree, 'dispatch-result').filter((n) => n.props['data-result'] === 'started')
+    .every((n) => all([n]).some((a) => a.type === 'a' && a.props.href.startsWith('/chat?slot=rsi-demo-'))))
+  assert.match(noteText(tree), /^Dispatch: 2 of \d+ started$/)
+}
 
 // Without the flag the page reads the backend only: an empty backend is an empty board, never the fixtures.
 globalThis.location = { search: '' }

@@ -87,6 +87,10 @@ try {
   await page.waitForFunction(() => document.querySelector('[data-testid="proposal-card"] [data-decision="do"]')?.getAttribute('aria-pressed') === 'true')
     .catch(() => errors.push('Enter did not press Do'))
   await shoot('board')
+  // Manual dispatch: Dispatch all Do starts the Do cards inline (demo: no chat opens), within the daily cap.
+  await page.getByTestId('dispatch-all').click()
+  await page.getByTestId('dispatch-result').first().waitFor()
+  await shoot('board-dispatched')
   for (const [i, name] of ['signals', 'rounds', 'prompts', 'team', 'settings'].entries()) {
     await page.getByRole('radio', { name: new RegExp(`^${TABS[i + 1]}`) }).click()
     await page.getByTestId(`panel-${name}`).waitFor()
@@ -99,4 +103,4 @@ try {
   fs.rmSync(tmp, { recursive: true, force: true })
 }
 if (errors.length) { console.error(errors.join('\n')); process.exit(1) }
-console.log(`wrote 6 shots for ${LANG} at ${W}px to ${OUT}`)
+console.log(`wrote 7 shots for ${LANG} at ${W}px to ${OUT}`)

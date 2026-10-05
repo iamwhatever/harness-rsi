@@ -14,7 +14,8 @@ starts ``python -m backend.autoscore`` (single-flight; the tick does when scorin
 ``GET /prompt-changes`` lists the proposer's prompt-change cards; ``POST /prompt-changes/decide``
 records the owner's choice, and 做 applies the change (``backend.prompt_changes``).
 ``/dispatch``: the owner's opt-in auto-dispatch (``backend.dispatch``, off by default); when on, 做 on a
-proposal card opens one worker chat for it. A prompt-change card never dispatches.
+proposal card opens one worker chat for it. ``POST /dispatch/start`` is the owner's Dispatch button: it
+opens those chats for chosen 做 cards whether auto-dispatch is on or off. A prompt-change card never dispatches.
 ``GET /team`` folds the lead's and lanes' self-reported work-ledger snapshots (``backend.team``).
 No timer in the gateway; loading the routes seals the data dir once (``judge.seal.migrate``, idempotent).
 """
@@ -323,6 +324,20 @@ async def _dispatch_post(request, ctx):
     return await _save(request, dispatch, "dispatch", dict)
 
 
+MAX_START = 50
+
+
+async def _dispatch_start(request, ctx):
+    """Owner-only Dispatch: ``{proposal_ids: [...]}`` -> one result per distinct id (``dispatch.start``)."""
+    if not _owner(request):
+        return _err(403, "owner_only", "only the dashboard owner can dispatch")
+    ids = (await _body(request) or {}).get("proposal_ids")
+    if not (isinstance(ids, list) and 0 < len(ids) <= MAX_START and all(isinstance(i, str) for i in ids)):
+        return _err(400, "bad_ids", f"proposal_ids must be 1-{MAX_START} proposal ids")
+    results = await dispatch.start(request, list(dict.fromkeys(ids)))
+    return web.json_response({"ok": True, "results": results, "dispatches": await asyncio.to_thread(dispatch.rows)})
+
+
 async def _team(request, ctx):
     return web.json_response({"ok": True, "team": await asyncio.to_thread(team.view)})
 
@@ -374,6 +389,7 @@ def register_routes(ctx):
         AppRoute(method="POST", path="/score/run", handler=_score_post),
         AppRoute(method="GET", path="/dispatch", handler=_dispatch_get),
         AppRoute(method="POST", path="/dispatch", handler=_dispatch_post),
+        AppRoute(method="POST", path="/dispatch/start", handler=_dispatch_start),
         AppRoute(method="GET", path="/prompt-changes", handler=_prompt_changes),
         AppRoute(method="POST", path="/prompt-changes/decide", handler=_prompt_decide),
         AppRoute(method="GET", path="/team", handler=_team),
