@@ -6,7 +6,7 @@ import fs from 'node:fs'
 import { createElement as h, __settle } from 'react'
 import Page, { HarnessRsi, TABS } from './ui/index.mjs'
 import { TABLE, setLang } from './ui/strings.mjs'
-import { demoSource, promptChange } from './ui/fake-data.mjs'
+import { demoSource, promptChange, team } from './ui/fake-data.mjs'
 
 const fixture = (f) => JSON.parse(fs.readFileSync(`fixtures/${f}.json`, 'utf8'))
 const [proposals, signals, outcomes] = ['proposals', 'signals', 'outcomes'].map(fixture)
@@ -37,6 +37,12 @@ assert.equal(byTest(demo.signals, 'signal-row').length, signals.length)
 assert.equal(byTest(demo.rounds, 'run-row').length, 1)
 assert.equal(byTest(demo.prompts, 'prompt-change-card').length, 1)
 assert.equal(byTest(demo.settings, 'slack-configured').length, 1)
+assert.equal(byTest(demo.team, 'team-note').length, 1, 'the Team tab says the data is self-reported')
+assert.equal(byTest(demo.team, 'team-item').length, 8)
+assert.deepEqual(byTest(demo.team, 'need').map((n) => n.props['data-why']), ['question', 'blocked', 'merge'])
+assert.equal(byTest(demo.team, 'team-lane').length, 3, 'two lanes under the lead, one loose')
+assert.equal(byTest(demo.team, 'stale-reporter').length, 2)
+assert.ok(byTest(demo.team, 'session-link').every((a) => a.props.href.startsWith('/chat?slot=')))
 assert.ok(byTest(demo.board, 'score').length >= 1, 'demo cards show the fixture judge scores')
 assert.ok(byTest(demo.board, 'sources')[0].children.some((a) => a?.props?.href === signals[0].links[0]), 'a card links its signal source')
 
@@ -51,6 +57,9 @@ const live = await __settle(page, true)
 assert.equal(byTest(live, 'demo-note').length, 0)
 assert.equal(byTest(live, 'proposal-card').length, 0)
 assert.equal(byTest(live, 'empty-state').length, 1)
+const liveTeam = await tabTo(page, live, 'team')
+assert.equal(byTest(liveTeam, 'team-item').length, 0, 'an empty backend is an empty Team tab, never the fixtures')
+assert.ok(reads.includes('/api/apps/harness-rsi/team'))
 assert.ok(reads.includes('/api/apps/harness-rsi/proposals'))
 // A failing backend is an error notice, not a blank page or a silent fallback to fixtures.
 globalThis.__api = { get: async () => { throw new Error('502 Bad Gateway') }, post: async () => ({}) }
@@ -66,7 +75,7 @@ const collect = (v, k) => {
   else if (v && typeof v === 'object') for (const [kk, x] of Object.entries(v)) collect(x, Array.isArray(v) ? null : kk)
 }
 const src = demoSource()
-collect([proposals, signals, outcomes, promptChange, await src.settings(), await src.dispatchConf(), await src.schedule()])
+collect([proposals, signals, outcomes, promptChange, team, await src.settings(), await src.dispatchConf(), await src.schedule()])
 const dataByLength = [...data].filter((x) => x.length > 1).sort((a, b) => b.length - a.length)
 const ATTRS = ['aria-label', 'alt', 'placeholder', 'title']
 const shown = (tree) => all(tree).flatMap((n) => [...n.children.filter((c) => typeof c === 'string' || typeof c === 'number').map(String),

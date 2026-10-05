@@ -45,6 +45,16 @@ const en = {
   dispTitle: 'Auto-dispatch', dispToggle: 'Open a worker chat when I press Do',
   dispIntro: 'Off until you switch it on and save. When on, Do on a proposal card opens one worker chat that builds it as one small PR, CI green, never merged. Prompt-change cards never dispatch.',
   dispRepos: 'Target repos (allowlist)', dispCap: 'Dispatches a day (1-10)',
+  tab_team: 'Team', teamNote: 'Pushed by the lead and its lanes at the end of each patrol cycle. Self-reported: the app cannot check who sent it. Approvals and credits are not shown.',
+  noTeam: 'No team snapshots yet', teamHint: 'The lead and lane agents this app ships push their work ledgers here each patrol cycle.',
+  needsTitle: 'Needs you', noNeeds: 'Nothing needs you', need_question: 'Question', need_blocked: 'Blocked', need_merge: 'Ready to merge',
+  prNum: 'PR #{n}', openSession: 'Open session', treeTitle: 'Lead and lanes', looseTitle: 'Lanes no lead names', roleLead: 'Lead', roleLane: 'Lane',
+  pushedAt: 'Round {round} · pushed {at}', pushedNoRound: 'Pushed {at}', staleReporter: 'No push for over {m} min', orphaned: 'Orphaned', staleItem: 'Stale',
+  count_progress: '{n} in progress', count_done: '{n} done', count_blocked: '{n} blocked', count_question: '{n} asking', count_none: '{n} not started',
+  count_accepted: '{n} accepted', count_rejected: '{n} rejected', count_abandoned: '{n} abandoned',
+  status_progress: 'in progress', status_done: 'done', status_blocked: 'blocked', status_question: 'asking', status_none: 'not started',
+  istate_accepted: 'accepted', istate_rejected: 'rejected', istate_abandoned: 'abandoned',
+  wverdict_pass: 'pass', wverdict_fail: 'fail', wverdict_pending: 'pending', wverdict_refused: 'refused', wverdict_error: 'error',
 }
 
 const zh = {
@@ -92,6 +102,16 @@ const zh = {
   dispTitle: '自动派发', dispToggle: '按「做」时打开一个工作对话',
   dispIntro: '打开并保存之前都不会运行。打开后，在提案卡片上按「做」会打开一个工作对话，把它做成一个小 PR，CI 通过，从不合并。提示词改动卡片从不派发。',
   dispRepos: '目标仓库（允许列表）', dispCap: '每天派发上限（1-10）',
+  tab_team: '团队', teamNote: '由领队和各分线在每次巡查结束时推送。这是自报数据：本应用无法核实发送者。这里不显示批准和用量。',
+  noTeam: '还没有团队快照', teamHint: '本应用带的领队和分线每次巡查都会把工作账本推到这里。',
+  needsTitle: '等你处理', noNeeds: '没有要你处理的事', need_question: '提问', need_blocked: '受阻', need_merge: '待你合并',
+  prNum: 'PR #{n}', openSession: '打开会话', treeTitle: '领队和分线', looseTitle: '没有领队认领的分线', roleLead: '领队', roleLane: '分线',
+  pushedAt: '第 {round} 轮 · {at} 推送', pushedNoRound: '{at} 推送', staleReporter: '超过 {m} 分钟没有推送', orphaned: '无人接手', staleItem: '停滞',
+  count_progress: '{n} 进行中', count_done: '{n} 已完成', count_blocked: '{n} 受阻', count_question: '{n} 在提问', count_none: '{n} 未开始',
+  count_accepted: '{n} 已验收', count_rejected: '{n} 已拒绝', count_abandoned: '{n} 已放弃',
+  status_progress: '进行中', status_done: '已完成', status_blocked: '受阻', status_question: '在提问', status_none: '未开始',
+  istate_accepted: '已验收', istate_rejected: '已拒绝', istate_abandoned: '已放弃',
+  wverdict_pass: '通过', wverdict_fail: '未通过', wverdict_pending: '待定', wverdict_refused: '被拒', wverdict_error: '出错',
 }
 
 export const TABLE = { en, zh }

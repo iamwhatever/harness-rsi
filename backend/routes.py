@@ -15,6 +15,7 @@ starts ``python -m backend.autoscore`` (single-flight; the tick does when scorin
 records the owner's choice, and 做 applies the change (``backend.prompt_changes``).
 ``/dispatch``: the owner's opt-in auto-dispatch (``backend.dispatch``, off by default); when on, 做 on a
 proposal card opens one worker chat for it. A prompt-change card never dispatches.
+``GET /team`` folds the lead's and lanes' self-reported work-ledger snapshots (``backend.team``).
 No timer in the gateway; loading the routes seals the data dir once (``judge.seal.migrate``, idempotent).
 """
 
@@ -35,7 +36,7 @@ except ImportError:  # tests and the CLI import ``backend`` as a top-level packa
     import adapters.sessions
     import adapters.slack
 
-from . import dispatch, ledger, prompt_changes, round_job, schedule, settings, store
+from . import dispatch, ledger, prompt_changes, round_job, schedule, settings, store, team
 from .ledger import seal
 
 APP_NAME = "harness-rsi"
@@ -322,6 +323,10 @@ async def _dispatch_post(request, ctx):
     return await _save(request, dispatch, "dispatch", dict)
 
 
+async def _team(request, ctx):
+    return web.json_response({"ok": True, "team": await asyncio.to_thread(team.view)})
+
+
 async def _prompt_changes(request, ctx):
     return web.json_response({"ok": True, "changes": await asyncio.to_thread(prompt_changes.read)})
 
@@ -371,4 +376,5 @@ def register_routes(ctx):
         AppRoute(method="POST", path="/dispatch", handler=_dispatch_post),
         AppRoute(method="GET", path="/prompt-changes", handler=_prompt_changes),
         AppRoute(method="POST", path="/prompt-changes/decide", handler=_prompt_decide),
+        AppRoute(method="GET", path="/team", handler=_team),
     ]

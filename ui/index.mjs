@@ -4,7 +4,7 @@
 import { createElement as h, useCallback, useEffect, useMemo, useState } from 'react'
 import * as sdk from '@kirocrew/app-sdk'
 import * as UI from '@kirocrew/app-sdk/ui'
-import { History, Inbox, Radio, Wand2 } from 'lucide-react'
+import { History, Inbox, Radio, Users, Wand2 } from 'lucide-react'
 import { getLang, has, pickLang, setLang, t } from './strings.mjs'
 import { demoSource, isDemo } from './fake-data.mjs'
 
@@ -36,6 +36,7 @@ export function backendSource(api) {
     decidePrompt: async (id, decision) => (await api.post(`${BASE}/prompt-changes/decide`, { id, decision })).change,
     dispatchConf: async () => (await api.get(`${BASE}/dispatch`)).dispatch,
     saveDispatch: async (conf) => (await api.post(`${BASE}/dispatch`, conf)).dispatch,
+    team: async () => (await api.get(`${BASE}/team`)).team,
   }
 }
 
@@ -228,7 +229,65 @@ export function Signals({ signals }) {
     td(h('code', null, s.source)), td(h(UI.Badge, { variant: s.layer === 'real' ? 'ok' : 'aim' }, word('layer', s.layer)))))))
 }
 
-export const TABS = ['board', 'signals', 'rounds', 'prompts', 'settings']
+/** The host chat for one session key. */
+export const sessionHref = (key) => `/chat?slot=${encodeURIComponent(key)}`
+const SessionLink = ({ k, label }) => h('a', { href: sessionHref(k), className: 'text-accent hover:underline', 'data-testid': 'session-link' }, label || k)
+const STATUS_TONE = { progress: 'aim', done: 'ok', blocked: 'err', question: 'warn', accepted: 'ok', rejected: 'err', abandoned: 'muted', none: 'muted' }
+/** An item's one status word: its worker status while open, else its closed state. */
+export const itemBucket = (i) => (i.state === 'open' ? i.status || 'none' : i.state)
+const bucketWord = (b) => (has(`status_${b}`) ? t(`status_${b}`) : word('istate', b))
+
+/** One work item: status, title, verdict, PR, flags, and its worker session (or the lane it opened). */
+function TeamItem({ item: i }) {
+  const b = itemBucket(i)
+  return h('li', { 'data-testid': 'team-item', 'data-id': i.item_id, className: 'py-1.5' },
+    h('div', { className: 'flex flex-wrap items-center gap-2' },
+      h(UI.Badge, { variant: STATUS_TONE[b] || 'muted' }, bucketWord(b)),
+      h('span', { className: 'text-text-strong' }, i.title),
+      i.verdict ? h(UI.Badge, { variant: i.verdict === 'pass' ? 'ok' : 'muted' }, word('wverdict', i.verdict)) : null,
+      i.pr ? h('span', { className: MUTED }, t('prNum', { n: i.pr })) : null,
+      i.orphaned ? h(UI.Badge, { variant: 'warn' }, t('orphaned')) : null,
+      i.stale ? h(UI.Badge, { variant: 'warn' }, t('staleItem')) : null,
+      !i.lane && i.worker_session_key ? h('span', { className: MUTED }, h(SessionLink, { k: i.worker_session_key })) : null),
+    i.summary ? h('div', { className: MUTED }, i.summary) : null,
+    i.lane ? h(Reporter, { rec: i.lane, nested: true }) : null)
+}
+
+/** One reporter (the lead or a lane): who, when it last pushed, and its items. */
+function Reporter({ rec: r, nested, staleMinutes = 90 }) {
+  return h('div', { 'data-testid': `team-${r.role}`, 'data-key': r.key, className: nested ? 'ml-4 mt-1 pl-3 border-l border-border' : '' },
+    h('div', { className: 'flex flex-wrap items-center gap-2' },
+      h(UI.Badge, { variant: r.role === 'lead' ? 'aim' : 'muted' }, t(r.role === 'lead' ? 'roleLead' : 'roleLane')),
+      h(SessionLink, { k: r.key }),
+      h('span', { className: MUTED }, r.round == null ? t('pushedNoRound', { at: at(r.received_at) }) : t('pushedAt', { round: r.round, at: at(r.received_at) })),
+      r.stale ? h(UI.Badge, { variant: 'warn', 'data-testid': 'stale-reporter' }, t('staleReporter', { m: staleMinutes })) : null),
+    r.goal ? h('div', { className: MUTED }, r.goal) : null,
+    h('ul', { className: 'list-none m-0 p-0' }, r.items.map((i) => h(TeamItem, { key: i.item_id, item: i }))))
+}
+
+export const COUNT_ORDER = ['question', 'blocked', 'progress', 'done', 'none', 'accepted', 'rejected', 'abandoned']
+/** The Team tab: self-reported note, counts by status, what needs you, then lead -> lanes -> workers. */
+export function Team({ team }) {
+  const note = h('div', { role: 'note', 'data-testid': 'team-note', className: MUTED }, t('teamNote'))
+  if (!team || !(team.leads.length || team.loose_lanes.length)) {
+    return stack(note, h(UI.EmptyState, { icon: h(Users, { size: 28 }), title: t('noTeam'), subtitle: t('teamHint') }))
+  }
+  const m = team.stale_minutes
+  return stack(note,
+    h('div', { className: 'flex flex-wrap gap-2', 'data-testid': 'team-counts' }, COUNT_ORDER.filter((k) => team.counts[k])
+      .map((k) => h(UI.Badge, { key: k, variant: STATUS_TONE[k] }, t(`count_${k}`, { n: team.counts[k] })))),
+    h(UI.Card, { key: 'needs' }, h('div', { className: LABEL }, t('needsTitle')),
+      team.needs_you.length ? h('ul', { className: 'list-none m-0 p-0' }, team.needs_you.map((n) => h('li', { key: n.item_id, 'data-testid': 'need', 'data-why': n.why, className: 'flex flex-wrap items-center gap-2 py-1' },
+        h(UI.Badge, { variant: n.why === 'merge' ? 'ok' : STATUS_TONE[n.why] }, t(`need_${n.why}`)), h('span', null, n.title),
+        n.pr ? h('span', { className: MUTED }, t('prNum', { n: n.pr })) : null, h(SessionLink, { k: n.session, label: t('openSession') }))))
+        : h('div', { className: MUTED, 'data-testid': 'no-needs' }, t('noNeeds'))),
+    h(UI.Card, { key: 'tree' }, h('div', { className: LABEL }, t('treeTitle')),
+      team.leads.map((r) => h(Reporter, { key: r.key, rec: r, staleMinutes: m }))),
+    team.loose_lanes.length ? h(UI.Card, { key: 'loose' }, h('div', { className: LABEL }, t('looseTitle')),
+      team.loose_lanes.map((r) => h(Reporter, { key: r.key, rec: r, staleMinutes: m }))) : null)
+}
+
+export const TABS = ['board', 'signals', 'rounds', 'prompts', 'team', 'settings']
 const why = (e) => String(e?.message || e)
 const clock = (s) => new Date(s * 1000).toLocaleTimeString(getLang(), { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
 /** One line for the GitHub job (it runs for minutes after a refresh). */
@@ -274,6 +333,7 @@ export function HarnessRsi({ src, demo = false }) {
   const reload = useCallback(() => src.load().then((d) => setState([d, '']), (e) => setState([null, why(e)])), [src])
   useEffect(() => { reload() }, [reload])
   const [changes, setChanges] = usePolled(src.promptChanges, () => false)
+  const [team] = usePolled(src.team, () => false)
   const [out, setOut] = usePolled(src.outcomes, scoreRunning)
   const [job, setJob] = usePolled(src.status, isRunning, reload)
   const [round, setRound] = usePolled(src.round, isRunning, reload)
@@ -321,6 +381,7 @@ export function HarnessRsi({ src, demo = false }) {
         h('div', { 'data-testid': 'round-job' }, lines(roundText(round) || t('roundNever'))), h('div', { 'data-testid': 'regress' }, lines(regressText(regress))),
         lines(jobText(job), scoreJobText(out?.score))),
       h(UI.Card, { key: 'runs' }, h(Runs, { runs: sched?.runs || [] }))],
+    team: () => [h(Team, { key: 't', team })],
     prompts: () => [(changes || []).length ? changes.map((c) => h(PromptChangeCard, { key: c.id, change: c, onDecide: decidePrompt })) : empty(Wand2, 'noPromptChanges')],
     settings: () => [form ? h(SettingsForm, { key: 'f', form, note: formNote, onSave: save, onChange: (f) => setForm([f, '']) }) : lines(formNote),
       sched ? h(ScheduleForm, { key: 's', conf: sched.schedule, note: schedNote, onSave: saveSched, onChange: (c) => setSched([{ ...sched, schedule: c }, '']) }) : null,

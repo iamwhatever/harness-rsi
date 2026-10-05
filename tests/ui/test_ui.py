@@ -20,8 +20,10 @@ def test_manifest_is_opt_in_with_no_automatic_actions():
     m = load("app.json")
     assert m["name"] == "harness-rsi" and m["version"] and m["displayName"] and m["description"]
     assert m["defaultEnabled"] is False
-    for key in ("agents", "mcpServers", "skills"):
-        assert not m.get(key), key
+    assert not m.get("skills")
+    # The only agents are the lead and lane conductors; the only MCP server is the stdio team tool (tests/backend/test_team.py).
+    assert [a.rsplit("/", 1)[1] for a in m["agents"]] == ["rsi-lead.json", *(f"rsi-lane-{x}.json" for x in ("find", "propose", "exam", "build", "prompt"))]
+    assert list(m["mcpServers"]) == ["team"] and "url" not in m["mcpServers"]["team"]
     assert [c["script"] for c in m["crons"]] == ["schedule_tick.py:run"]  # asks the backend; the owner's switches decide
     assert {c["id"]: c["defaultPriority"] for c in m["notifications"]["channels"]} == {"rounds": "default", "regressions": "critical"}
     assert m["backend"] == {"hooks": {"routes": "backend.routes:register_routes"}}  # no startup hook, no loop
@@ -35,7 +37,7 @@ def test_manifest_is_opt_in_with_no_automatic_actions():
 
 def test_fake_data_is_a_copy_of_the_fixtures():
     lines = (ROOT / "ui" / "fake-data.mjs").read_text(encoding="utf-8").splitlines()
-    for name in ("proposals", "signals", "outcomes"):
+    for name in ("proposals", "signals", "outcomes", "team"):
         line = next(x for x in lines if x.startswith(f"export const {name} = "))
         assert json.loads(line.split(" = ", 1)[1]) == load(f"fixtures/{name}.json")
 

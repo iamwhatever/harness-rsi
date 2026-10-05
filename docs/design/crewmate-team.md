@@ -1,6 +1,14 @@
 # Harness RSI 设计 v4：只有一个 crewmate，团队视图先在 App 里做
 
-状态：草案 v0.4 · 2026-10-04 · 负责人：iamwhatever · 上级文档：Harness RSI 设计文档（KiroCrew 本地 artifact `harness-rsi`） · 本文件对应 artifact `harness-rsi-crewmate-team` 版本 6；v3.1 是版本 5，v3 是版本 4，v2 是版本 2
+状态：草案 v0.5 · 2026-10-05 · 负责人：iamwhatever · 上级文档：Harness RSI 设计文档（KiroCrew 本地 artifact `harness-rsi`） · 本文件对应 artifact `harness-rsi-crewmate-team` 版本 6；v3.1 是版本 5，v3 是版本 4，v2 是版本 2
+
+v0.5 变更（按负责人裁定）：这一条线只改 harness-rsi App，不改 KiroCrew 核心。K1、K2 暂缓（RFC #16790 仍是草稿）。lead 是 conductor，它的工作账本就是看板；团队视图改用推送：lead 和分线每次巡查结束时把自己的 `work_ledger_read compact=true` 推给 App 的 MCP 工具 `rsi_report_ledger`，App 折成树，显示在新的"团队"标签页上（§6.3）。推送的数据是自报的；批准和 credits 不显示。
+
+| 改了什么 | v0.4 | v0.5 |
+|---|---|---|
+| 团队视图的数据从哪来 | K2 读宿主的 K1 fold；K2 之前读快速档脚本 | lead 和分线自己推送工作账本（§6.3） |
+| 核心改动 | K1、K2 | 无；K1、K2 暂缓 |
+| 能显示什么 | 树、等你、目标、预算、信任 | 树、按状态计数、等你；批准、credits、信任不显示 |
 
 v0.4 变更（按负责人对 v3.1 的裁定）：去掉 team 这个概念。用户看到的只是一个普通 crewmate（lead）；分线和 worker 只是它开的会话。Crewmates 页一点不改。所有"团队式"的视图都先在 harness-rsi App 里做、先试；证明有用以后再挪进核心。
 
@@ -129,7 +137,9 @@ Crewmates 页上，`rsi-lead` 和别的 crewmate 一样：一张名片、一个 
 | 5 条分线 | conductor 会话，用 lead 的库 | App 带的 `harness-rsi--rsi-lane-*` | 写进 lead 的库，带线标签 | work ledger、`session_create`、本线 App 工具、`work_report` |
 | 叶子 | 普通 worker，用 lead 的库 | 现有 `rsi-*` 的 `-w` 版；实现线用 `rsi-builder` | 无 | 本角色最小工具集 |
 
-## 5. KiroCrew 核心改动：只有 K1、K2
+## 5. KiroCrew 核心改动：只有 K1、K2（v0.5 起暂缓）
+
+本节保留作以后的参考。现在的计划是 §6.3 的推送，不改核心。
 
 两块都通用，不认识 RSI，不改任何页面。RFC 是 #16790（正在改写成只讲 K1+K2）；#16796 已关。
 
@@ -221,6 +231,27 @@ flowchart LR
 | A3 删快速档脚本 | `tools/fast_tier/team_fold.py`、`trust_preflight.py` 删掉，A2 只读 K2；`break_probe.py`、`trust_restart_check.py` 是实测工具，留下，它们用的 `crewlog.py` 也留下 | 看不到变化；数字来源换成宿主的 fold |
 
 App 页面不能点批准：等你里的卡只是链接，批准按钮只在宿主里。
+
+### 6.3 推送模型（v0.5 的计划）
+
+```mermaid
+flowchart LR
+  L["lead"] -->|"每次巡查结束：rsi_report_ledger"| T["App MCP 工具"]
+  LN["分线"] -->|"每次巡查结束：rsi_report_ledger"| T
+  T -->|"校验、封顶、每个上报者一份"| D[("数据目录 team/")]
+  D --> F["折成树"] --> P["团队标签页"]
+```
+
+| 部件 | 做什么 | 代码 |
+|---|---|---|
+| `rsi_report_ledger` | 收 `role`（lead / lane）、`round`、`snapshot`（`work_ledger_read compact=true` 的整段 JSON）；上报者默认取 `snapshot.conductor.slot_key`，给了别的就拒；状态、结论、PR、会话 key 类型不对就拒并写出字段；超过 200 条或 256 KB 拒；文字按上限截断；只留页面要的列 | `backend/mcp_server.py`、`backend/team.py` |
+| 存储 | `<数据目录>/team/<上报者 key 的哈希>.json`，同一上报者新的覆盖旧的；最多 64 份；`team/` 是链接或指到别处就拒写，所以写不进封存目录 | `backend/team.py` `team_dir` |
+| 折树 | lead → 分线（lead 的 item 的 `worker_session_key` 等于分线的 key）→ worker；没有 lead 认领的分线单列；上报者超过 90 分钟没推送标"停滞"；item 自带的 orphaned / stale 照样显示 | `backend/team.py` `fold` |
+| 等你 | 未关的 item 在提问或受阻；结论是 pass 且有 PR 的 item 标"待你合并"（App 看不到合并，合并后要等 lead 的账本里不再有它） | 同上 |
+| 团队标签页 | 自报说明、按状态计数、等你（每条链到宿主会话）、树；`?demo=1` 用 `fixtures/team.json`，它就是 `fold` 在 `fixtures/team_snapshots.json` 上的输出 | `ui/index.mjs` `Team` |
+| agent | 清单 `agents` 带 `rsi-lead` 和 5 个 `rsi-lane-*`；提示词要求每次巡查最后一步推送；`allowedTools` 含 `@harness-rsi:team/rsi_report_ledger` | `crew/agents/` |
+
+风险：工具看不到是哪个会话调了它，所以推送的数据只是上报者自己说的；任何能调这个工具的会话都能冒充别的 key 推一份。页面写明是自报的。批准、credits 和信任不在工作账本里，页面不显示；预算和开轮前信任检查仍留给以后（K1、K2 或快速档脚本）。
 
 ## 7. 一轮的数据流
 
