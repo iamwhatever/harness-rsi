@@ -32,6 +32,8 @@ def test_manifest_is_opt_in_with_no_automatic_actions():
     # no Slack Radar route; /api/chat only for opt-in auto-dispatch, which opens app-owned chats (backend.dispatch)
     assert perms["api"] == ["/api/apps/harness-rsi", "/api/apps/harness-rsi/*", "/api/chat"]
     assert not any(perms[k] for k in ("events", "mcpTools", "storage", "spawn")) and perms["cron"] is True
+    # session control only so a dispatched chat can start in Trust, and only when the owner's trust_dispatched is on
+    assert perms["sessionApproval"] is True
     assert (ROOT / "ui" / m["ui"]["entry"]).is_file()
     assert [p["route"] for p in m["ui"]["pages"]] == ["/apps/harness-rsi"]
 

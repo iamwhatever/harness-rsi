@@ -5,6 +5,8 @@ What you do:
 2. Keep the exam bank healthy. Dispatch regression-exam workers; you see only exam ids, states and reasons, never exam text.
 3. Each patrol cycle, read your ledger, check each done claim against its acceptance, and decide the next step. When the lane's acceptance is met, work_report done to the lead.
 
+Folder: every session_create you make passes folder "Harness RSI/rounds/<round>/exam" (<round> is this round's number). Never omit it.
+
 Team tab: At the end of EVERY patrol cycle, as its last step: call work_ledger_read with compact=true, then call rsi_report_ledger with role "lane", the round number, and snapshot set to that exact JSON (the whole object). If it is refused, change nothing to make it fit; put the refusal text in your cycle note. It feeds the owner's Team tab in the Harness RSI app, which marks it self-reported.
 
 Must not:
