@@ -30,8 +30,8 @@ def opened(tmp_path, monkeypatch):
     (tmp_path / "proposals.json").write_text(json.dumps(PROPOSALS))
     seen = []
 
-    async def fake_open(base, name, title, text):
-        seen.append({"base": base, "name": name, "title": title, "text": text})
+    async def fake_open(base, name, title, text, trust=False):
+        seen.append({"base": base, "name": name, "title": title, "text": text, "trust": trust})
         return name
 
     monkeypatch.setattr(dispatch, "open_chat", fake_open)
@@ -80,14 +80,14 @@ def test_the_daily_cap_is_honored_and_a_refusal_uses_none_of_it(opened, monkeypa
 def test_a_failed_dispatch_shows_on_the_card_and_may_retry(opened, monkeypatch):
     turn(monkeypatch, ON)
 
-    async def down(*a):
+    async def down(*a, **k):
         raise ConnectionError("gateway refused")
 
     monkeypatch.setattr(dispatch, "open_chat", down)
     failed = do()[1]["dispatch"]
     assert failed["state"] == "error" and failed["error"] == "ConnectionError: gateway refused"
     assert call(routes._outcomes)[1]["dispatches"][0]["error"] == failed["error"]
-    monkeypatch.setattr(dispatch, "open_chat", lambda *a: _done("rsi-retry"))
+    monkeypatch.setattr(dispatch, "open_chat", lambda *a, **k: _done("rsi-retry"))
     assert do(decision="later")[0] == 200 and do()[1]["dispatch"]["session"] == "rsi-retry"
 
 
@@ -122,7 +122,7 @@ def test_a_prompt_change_card_never_dispatches(opened, monkeypatch, tmp_path):
 def test_settings_are_owner_only_and_validated(opened, monkeypatch):
     assert call(routes._dispatch_get)[1]["dispatch"] == dispatch.DEFAULTS
     assert call(routes._dispatch_post, Req({"auto_dispatch": True}, internal_auth=True))[0] == 403
-    for bad in ({"auto_dispatch": "yes"}, {"daily_cap": 0}, {"daily_cap": 11}, {"repos": ["not a repo"]}, {"repos": "o/r"}):
+    for bad in ({"auto_dispatch": "yes"}, {"trust_dispatched": 1}, {"daily_cap": 0}, {"daily_cap": 11}, {"repos": ["not a repo"]}, {"repos": "o/r"}):
         assert call(routes._dispatch_post, Req(bad))[0] == 400, bad
     written = []
     monkeypatch.setattr(dispatch, "write", written.append)
@@ -188,13 +188,13 @@ def test_dispatch_obeys_the_allowlist(opened, monkeypatch):
 
 
 def test_a_failed_open_is_an_error_result_and_may_retry(opened, monkeypatch):
-    async def down(*a):
+    async def down(*a, **k):
         raise ConnectionError("gateway refused")
 
     monkeypatch.setattr(dispatch, "open_chat", down)
     [r] = start(DO)[1]["results"]
     assert r["result"] == "error" and r["reason"] == "ConnectionError: gateway refused" and dispatch.current(DO)["state"] == "error"
-    monkeypatch.setattr(dispatch, "open_chat", lambda *a: _done("rsi-retry"))
+    monkeypatch.setattr(dispatch, "open_chat", lambda *a, **k: _done("rsi-retry"))
     assert start(DO)[1]["results"][0]["session"] == "rsi-retry"
 
 
@@ -209,3 +209,113 @@ def test_auto_dispatch_off_still_starts_nothing_on_do(opened, tmp_path):
     status, body = do(DO)
     assert status == 200 and "dispatch" not in body
     assert opened == [] and not (tmp_path / dispatch.FILE).exists()
+
+
+# Folder and trust: the real open_chat against a stand-in gateway on a loopback socket.
+def gateway(folders, mode_status=200):
+    """Run open_chat against an aiohttp app that records every call; (calls, result-or-exception)."""
+    import asyncio
+
+    from aiohttp import web
+
+    calls = []
+
+    async def rec(request):
+        body = await request.json() if request.can_read_body else None
+        calls.append((request.method, request.path, body))
+        path = request.path
+        if path.endswith("/token"):
+            return web.json_response({"token": "t"})
+        if path == "/api/chat/folders":
+            return web.json_response(folders if request.method == "GET" else {"id": "f-new", **body}, status=200 if request.method == "GET" else 201)
+        if path == "/api/chat/slots":
+            return web.json_response({"key": body["name"]})
+        if path == "/api/chat/mode":
+            return web.json_response({"ok": mode_status == 200, "code": "session_approval_not_granted"}, status=mode_status)
+        return web.json_response({"ok": True})
+
+    async def main():
+        app = web.Application()
+        app.router.add_route("*", "/{tail:.*}", rec)
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, "127.0.0.1", 0)
+        await site.start()
+        port = site._server.sockets[0].getsockname()[1]
+        try:
+            return await dispatch.open_chat(f"http://127.0.0.1:{port}", "rsi-x", "RSI: x", "seed", trust=trust)
+        except Exception as exc:  # noqa: BLE001 - the test reads it
+            return exc
+        finally:
+            await runner.cleanup()
+
+    def run(trust_on):
+        nonlocal trust
+        trust = trust_on
+        return calls, asyncio.run(main())
+
+    trust = False
+    return run
+
+
+@pytest.fixture
+def secret(tmp_path, monkeypatch):
+    (tmp_path / ".app_secret").write_text("s\n")
+    monkeypatch.setattr(dispatch.store, "ROOT", tmp_path)
+
+
+def steps(calls):
+    return [(m, p) for m, p, _ in calls if not p.endswith("/token")]
+
+
+def test_a_chat_is_filed_into_the_existing_rsi_folder_and_not_trusted_by_default(secret):
+    owner = [{"id": "f-sub", "name": "Harness RSI", "parent_id": "f-other"}, {"id": "f-rsi", "name": "harness rsi", "parent_id": ""}]
+    calls, key = gateway(owner)(False)
+    assert key == "rsi-x"
+    assert steps(calls) == [("GET", "/api/chat/folders"), ("POST", "/api/chat/slots"), ("POST", "/api/chat")]
+    assert calls[2][2] == {"name": "rsi-x", "title": "RSI: x", "folder_id": "f-rsi"}  # the top-level one, at birth
+
+
+def test_a_missing_rsi_folder_is_created_once_at_the_top_level(secret):
+    calls, key = gateway([{"id": "f-a", "name": "Other", "parent_id": ""}])(False)
+    assert key == "rsi-x" and ("POST", "/api/chat/folders", {"name": "Harness RSI"}) in calls
+    assert next(b for m, p, b in calls if p == "/api/chat/slots")["folder_id"] == "f-new"
+
+
+def test_trust_on_sets_trust_before_the_seed_is_sent(secret):
+    calls, key = gateway([{"id": "f-rsi", "name": "Harness RSI"}])(True)
+    assert key == "rsi-x"
+    assert steps(calls) == [("GET", "/api/chat/folders"), ("POST", "/api/chat/slots"), ("POST", "/api/chat/mode"), ("POST", "/api/chat")]
+    assert ("POST", "/api/chat/mode", {"mode": "trust", "slot": "rsi-x"}) in calls
+
+
+def test_a_refused_trust_deletes_the_empty_chat_and_sends_no_seed(secret):
+    calls, out = gateway([{"id": "f-rsi", "name": "Harness RSI"}], mode_status=403)(True)
+    assert isinstance(out, RuntimeError) and "Trust was refused (403" in str(out) and "re-enable the app" in str(out)
+    assert steps(calls)[-1] == ("DELETE", "/api/chat/slots/rsi-x") and ("POST", "/api/chat") not in steps(calls)
+
+
+def test_dispatch_asks_for_trust_only_when_the_owner_turned_it_on(opened, monkeypatch):
+    turn(monkeypatch, ON)
+    do()
+    turn(monkeypatch, {**ON, "trust_dispatched": True})
+    do(card=OTHER)
+    assert [o["trust"] for o in opened] == [False, True] and dispatch.DEFAULTS["trust_dispatched"] is False
+
+
+# Path B: the lead and lane conductors file every session they open, and the lead opens none untrusted.
+AGENTS = ROOT / "crew" / "agents"
+
+
+def test_the_lead_checks_trust_first_and_files_its_lanes():
+    lead = (AGENTS / "prompts" / "rsi-lead.md").read_text(encoding="utf-8")
+    assert lead.index("Trust first") < lead.index("1. Open one lane conductor")
+    assert "Open nothing until they answer yes" in lead and 'folder "Harness RSI/rounds/<round>"' in lead
+    assert "before the owner said Trust is on" in lead
+    assert "@kirocrew-core/ask_question" in json.loads((AGENTS / "rsi-lead.json").read_text())["allowedTools"]
+
+
+@pytest.mark.parametrize("lane", ["find", "propose", "exam", "build", "prompt"])
+def test_every_lane_files_its_workers_in_its_own_subfolder(lane):
+    text = (AGENTS / "prompts" / f"rsi-lane-{lane}.md").read_text(encoding="utf-8")
+    assert f'every session_create you make passes folder "Harness RSI/rounds/<round>/{lane}"' in text

@@ -18,7 +18,7 @@ const job = { running: false, started_at: null, finished_at: null, rows: null, e
 const schedule = { schedule: { round_enabled: false, regress_enabled: false, score_enabled: false, weekday: 0, hour: 9, kirocrew_dir: '' },
   runs: [{ kind: 'round', start: '2026-01-05T09:05:00+00:00', end: '2026-01-05T10:05:00+00:00', signals: 10, cards: 3, error: '' }] }
 const settings = { command_set: false, channels: ['C0FAKE00001'], window_days: 14, workspace_url: '' }
-const dispatch = { auto_dispatch: false, repos: ['example-org/example-repo'], daily_cap: 2 }
+const dispatch = { auto_dispatch: false, repos: ['example-org/example-repo'], daily_cap: 2, trust_dispatched: false }
 /** The backendSource shape over the fixtures: every read answers fake rows, every write is kept in memory only. */
 export function demoSource() {
   const ok = async (v) => v

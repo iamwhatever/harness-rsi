@@ -100,6 +100,8 @@ export function DispatchForm({ conf, onChange, onSave, note }) {
     h(UI.SettingsToggle, { name: 'auto_dispatch', label: t('dispToggle'), checked: !!conf.auto_dispatch, onChange: (v) => onChange({ ...conf, auto_dispatch: v }) }),
     h(UI.SettingsInput, { name: 'repos', label: t('dispRepos'), value: conf.repos.join(', '), onChange: (v) => onChange({ ...conf, repos: words(v) }) }),
     h(UI.SettingsInput, { name: 'daily_cap', type: 'number', min: 1, max: 10, label: t('dispCap'), value: String(conf.daily_cap), onChange: (v) => onChange({ ...conf, daily_cap: Number(v) }) }),
+    h(UI.SettingsToggle, { name: 'trust_dispatched', label: t('dispTrust'), checked: !!conf.trust_dispatched, onChange: (v) => onChange({ ...conf, trust_dispatched: v }) }),
+    h('div', { className: 'text-[13px] text-danger', 'data-testid': 'trust-risk' }, t('dispTrustRisk')),
     h(Saver, { onSave, note }))
 }
 

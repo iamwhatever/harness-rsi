@@ -202,7 +202,7 @@ const done = expand(ui.PromptChangeCard({ change: { ...pc, status: 'applied', ab
 assert.equal(find(done, (n) => n.type === 'button').length, 0)
 assert.ok(text(done[0]).includes('Applied: rsi-question-setter now runs v0123456789') && text(done[0]).includes('No A/B run yet'))
 // Auto-dispatch: the source reads and saves it; the form starts off; a card shows its worker chat or why it failed.
-const dconf = { auto_dispatch: false, repos: ['kirodotdev/KiroCrew'], daily_cap: 2 }
+const dconf = { auto_dispatch: false, repos: ['kirodotdev/KiroCrew'], daily_cap: 2, trust_dispatched: false }
 const dapi = { get: async (p) => { assert.equal(p, '/api/apps/harness-rsi/dispatch'); return { dispatch: dconf } },
   post: async (p, b) => { assert.equal(p, '/api/apps/harness-rsi/dispatch'); return { dispatch: b } } }
 assert.deepEqual(await ui.backendSource(dapi).dispatchConf(), dconf)
@@ -214,8 +214,12 @@ assert.equal(dbox.props.checked, false)
 dbox.props.onChange(true)
 find(dform, (n) => n.props?.name === 'repos')[0].props.onChange('a/b, c/d')
 find(dform, (n) => n.props?.name === 'daily_cap')[0].props.onChange('3')
+const tbox = find(dform, (n) => n.props?.name === 'trust_dispatched')[0]
+assert.equal(tbox.props.checked, false)  // trust starts off; its risk line is always shown beside it
+tbox.props.onChange(true)
+assert.ok(text(find(dform, (n) => n.props?.['data-testid'] === 'trust-risk')[0]).startsWith('Risk: a trusted chat runs tools without asking you'))
 find(dform, (n) => n.type === 'button')[0].props.onClick()
-assert.deepEqual(dedits, [{ ...dconf, auto_dispatch: true }, { ...dconf, repos: ['a/b', 'c/d'] }, { ...dconf, daily_cap: 3 }, 'save'])
+assert.deepEqual(dedits, [{ ...dconf, auto_dispatch: true }, { ...dconf, repos: ['a/b', 'c/d'] }, { ...dconf, daily_cap: 3 }, { ...dconf, trust_dispatched: true }, 'save'])
 const sentRow = { card_id: 'prop_bg_tasks', state: 'dispatched', session: 'rsi-bg-tasks-1', error: '' }
 const dcard = expand(ui.ProposalCard({ proposal: proposals[0], onDecide() {}, dispatch: sentRow }))
 assert.equal(find(dcard, (n) => n.type === 'a' && n.props.href === '/chat?slot=rsi-bg-tasks-1').length, 1)

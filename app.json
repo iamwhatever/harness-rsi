@@ -17,7 +17,7 @@
   ],
   "defaultEnabled": false,
   "platform": {"os": ["macos", "linux", "windows"]},
-  "permissions": {"api": ["/api/apps/harness-rsi", "/api/apps/harness-rsi/*", "/api/chat"], "events": [], "mcpTools": [], "storage": false, "network": true, "cron": true, "spawn": false},
+  "permissions": {"api": ["/api/apps/harness-rsi", "/api/apps/harness-rsi/*", "/api/chat"], "events": [], "mcpTools": [], "storage": false, "network": true, "cron": true, "spawn": false, "sessionApproval": true},
   "agents": ["crew/agents/rsi-lead.json", "crew/agents/rsi-lane-find.json", "crew/agents/rsi-lane-propose.json", "crew/agents/rsi-lane-exam.json", "crew/agents/rsi-lane-build.json", "crew/agents/rsi-lane-prompt.json"],
   "mcpServers": {"team": {"command": "python3", "args": ["-c", "import os,runpy,sys;h=[os.environ.get('KIROCREW_HOME',''),os.path.expanduser('~/.kiro/crew'),os.path.expanduser('~/.kirocrew')];p=next((os.path.join(d,'apps','harness-rsi','backend','mcp_server.py') for d in h if d and os.path.isfile(os.path.join(d,'apps','harness-rsi','backend','mcp_server.py'))),None);p or sys.exit('harness-rsi: mcp_server.py not found under the crew home');runpy.run_path(p,run_name='__main__')"]}},
   "crons": [{"name": "schedule-tick", "cron_expr": "5 * * * *", "script": "schedule_tick.py:run", "silent": true, "persistent_session": false}],

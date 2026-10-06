@@ -4,8 +4,11 @@ Settings (``auto_dispatch``, the target-repo allowlist, the daily cap) live in t
 owner-only ``POST /dispatch`` writes them. ``POST /dispatch/start`` is the owner's Dispatch button: it
 starts chosen 做 cards whatever ``auto_dispatch`` says, under the same allowlist, cap and single-flight. A dispatch goes through the gateway's ordinary app API with
 this app's own token: ``POST /api/apps/harness-rsi/token`` -> ``POST /api/chat/slots`` (an app-owned
-chat the owner sees in the sidebar) -> ``POST /api/chat`` with the seed; the turn runs on after the
-stream is closed. ``dispatches.jsonl`` holds one row per change; the newest per card is
+chat the owner sees in the sidebar, filed at birth into the top-level ``Harness RSI`` folder, found
+by name through ``GET /api/chat/folders`` or created once) -> ``POST /api/chat`` with the seed; the turn
+runs on after the stream is closed. With the owner's ``trust_dispatched`` setting on (default off) the
+new chat is set to Trust (``POST /api/chat/mode``, needs ``permissions.sessionApproval``) before the seed
+is sent; a refused mode deletes the empty chat and fails the dispatch, so no untrusted worker starts. ``dispatches.jsonl`` holds one row per change; the newest per card is
 current. A card with a pending or open dispatch never dispatches again; a failed one may retry. The
 seed carries the card, its signals, prior art and limits, never an exam: :func:`seed` refuses text
 naming one. Prompt-change cards never come here.
@@ -22,7 +25,8 @@ from . import prompt_changes, settings, store
 
 APP, VAULT_NAME, FILE = "harness-rsi", "harness-rsi.dispatch", "dispatches.jsonl"
 TARGET = "kirodotdev/KiroCrew"  # every card is a KiroCrew change (autoscore.REPO); it must be allowlisted
-DEFAULTS = {"auto_dispatch": False, "repos": [TARGET], "daily_cap": 2}
+DEFAULTS = {"auto_dispatch": False, "repos": [TARGET], "daily_cap": 2, "trust_dispatched": False}
+FOLDER = "Harness RSI"  # every RSI chat lives in this one top-level folder
 MAX_REPOS, MAX_CAP, TIMEOUT_S = 10, 10, 30
 _REPO_RE = re.compile(r"^[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}$")
 _LOCK = threading.Lock()
@@ -31,7 +35,7 @@ _LOCK = threading.Lock()
 def validate(patch, current):
     """``(conf, errors)``: ``patch`` over ``current``; any error refuses the write."""
     new = {**current, **{k: patch[k] for k in DEFAULTS if k in patch}}
-    errors = [] if type(new["auto_dispatch"]) is bool else ["auto_dispatch must be true or false"]
+    errors = [f"{k} must be true or false" for k in ("auto_dispatch", "trust_dispatched") if type(new[k]) is not bool]
     repos = new["repos"]
     if not (isinstance(repos, list) and len(repos) <= MAX_REPOS and all(isinstance(r, str) and _REPO_RE.match(r) for r in repos)):
         errors.append(f"repos must be up to {MAX_REPOS} GitHub repos like owner/name")
@@ -146,8 +150,26 @@ def base_url(request):
     return (f"http://[{host}]" if ":" in host else f"http://{host}") + f":{sock[1]}"
 
 
-async def open_chat(base, name, title, text):
-    """Open one app-owned chat through the gateway's app API and send ``text``; the chat's session key."""
+def folder_id(folders):
+    """The id of the top-level folder named :data:`FOLDER` (any letter case), or None."""
+    return next((str(f["id"]) for f in folders if isinstance(f, dict) and f.get("id") and not f.get("parent_id")
+                 and str(f.get("name") or "").casefold() == FOLDER.casefold()), None)
+
+
+async def _folder(http, base, auth):
+    """The RSI folder's id: the existing one, else one this app creates at the top level."""
+    async with http.get(f"{base}/api/chat/folders", headers=auth) as r:
+        r.raise_for_status()
+        found = folder_id(await r.json())
+    if found:
+        return found
+    async with http.post(f"{base}/api/chat/folders", json={"name": FOLDER}, headers=auth) as r:
+        r.raise_for_status()
+        return str((await r.json())["id"])
+
+
+async def open_chat(base, name, title, text, trust=False):
+    """Open one app-owned chat in the RSI folder, set it to Trust when ``trust``, send ``text``; its key."""
     import aiohttp
 
     secret = (store.ROOT / ".app_secret").read_text(encoding="utf-8").strip()
@@ -155,22 +177,30 @@ async def open_chat(base, name, title, text):
         async with http.post(f"{base}/api/apps/{APP}/token", headers={"X-App-Secret": secret}) as r:
             r.raise_for_status()
             auth = {"Cookie": f"mc_token_{base.rsplit(':', 1)[1]}={(await r.json())['token']}"}
-        async with http.post(f"{base}/api/chat/slots", json={"name": name, "title": title}, headers=auth) as r:
+        folder = await _folder(http, base, auth)
+        async with http.post(f"{base}/api/chat/slots", json={"name": name, "title": title, "folder_id": folder}, headers=auth) as r:
             r.raise_for_status()
             key = (await r.json())["key"]
+        if trust:
+            async with http.post(f"{base}/api/chat/mode", json={"mode": "trust", "slot": key}, headers=auth) as r:
+                refused = None if r.status == 200 else f"{r.status} {(await r.text())[:120]}"
+            if refused:
+                async with http.delete(f"{base}/api/chat/slots/{urllib.parse.quote(key, safe='')}", headers=auth):
+                    pass  # best effort: the chat is empty, nothing ran in it
+                raise RuntimeError(f"Trust was refused ({refused}); re-enable the app on its detail page to grant session control")
         async with http.post(f"{base}/api/chat", json={"message": text, "slot": key}, headers=auth) as r:
             r.raise_for_status()  # accepted: the turn runs on in the gateway after this stream closes
     return key
 
 
-async def _open(request, card, row):
+async def _open(request, card, row, conf):
     """Seed and open the worker chat for a claimed ``row``; the finished row (dispatched or error)."""
     try:
         text = await asyncio.to_thread(lambda: seed(card, store.read_signals(), prior_art(card["id"])))
         if not (base := base_url(request)):
             raise RuntimeError("no gateway address for this request")
         name = f"rsi-{card['id'][5:].replace('_', '-')[:40]}-{now().strftime('%m%d%H%M%S')}"
-        key = await open_chat(base, name, f"RSI: {card['pain'][:60]}", text)
+        key = await open_chat(base, name, f"RSI: {card['pain'][:60]}", text, trust=conf["trust_dispatched"])
         return await asyncio.to_thread(finish, row, key)
     except Exception as exc:  # noqa: BLE001 - the card shows why; the decision itself stands
         return await asyncio.to_thread(finish, row, None, f"{type(exc).__name__}: {str(exc)[:150]}")
@@ -182,7 +212,7 @@ async def on_do(request, card):
     if not conf["auto_dispatch"]:
         return None
     row, outcome = await asyncio.to_thread(claim, card["id"], conf)
-    return await _open(request, card, row) if outcome == "started" else row
+    return await _open(request, card, row, conf) if outcome == "started" else row
 
 
 def chat_link(session):
@@ -215,7 +245,7 @@ async def start(request, card_ids):
         elif outcome == "not_allowed":
             out.append({"id": cid, "result": "error", "reason": row["error"]})
         else:
-            done = await _open(request, card, row)
+            done = await _open(request, card, row, conf)
             out.append({"id": cid, "result": "error", "reason": done["error"], "row": done} if done["state"] == "error"
                        else {"id": cid, "result": "started", "session": done["session"], "link": chat_link(done["session"]), "row": done})
     return out
