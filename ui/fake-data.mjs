@@ -9,7 +9,8 @@ export const loadFixtures = async () => ({ proposals, signals, images: {} })
 export const promptChange = { id: 'pc_0123456789', agent: 'rsi-question-setter', from: 'vaaaaaaaaaa', to: 'v0123456789',
   summary: 'Exams must run on a plain checkout: no files the exam itself does not create.', status: 'pending', at: '2026-01-06T09:00:00+00:00',
   diff: '--- rsi-question-setter.md (A)\n+++ rsi-question-setter.md (B)\n@@ -9 +9,2 @@\n-6. Example old rule.\n+6. Example new rule.\n+7. Another new rule.\n',
-  ab: { rounds: [3, 4], reps: 3, A: 'vaaaaaaaaaa', B: 'v0123456789', metrics: {
+  ab: { rounds: [3, 4], reps: 3, A: 'vaaaaaaaaaa', B: 'v0123456789', ran_at: '2026-01-06T08:10:00+00:00',
+    command: 'python3 crew/ab.py --agent rsi-question-setter --variant setter-b.md --kirocrew KiroCrew --rounds 3 4 --reps 3', metrics: {
     setter_hit_rate: { A: 0.1, B: 0.3, verdict: 'better' }, credits_per_turn: { A: 0.21, B: 0.22, verdict: 'same' } } } }
 
 /** Demo mode is an explicit query flag, so a production page never shows fixtures by accident. */
@@ -27,6 +28,7 @@ const dispatch = { auto_dispatch: false, repos: ['example-org/example-repo'], da
 export function demoSource() {
   const ok = async (v) => v
   let rows = proposals
+  let pc = promptChange  // a decided prompt change stays decided, in memory only
   const sent = []  // FAKE dispatch rows: Dispatch opens no chat in demo mode
   const dispatchCards = (ids) => ok({ results: ids.map((id) => {
     const p = rows.find((x) => x.id === id)
@@ -45,6 +47,7 @@ export function demoSource() {
     runRound: () => ok({ running: false, round: 4, finished_at: null }), regress: () => ok(null),
     refresh: () => ok({ total: signals.length, added: 0, errors: [], github: job }), settings: () => ok(settings), saveSettings: () => ok(settings),
     schedule: () => ok(schedule), saveSchedule: (c) => ok(c), outcomes: () => ok({ outcomes, dispatches: sent, score: null }), link: () => ok({ ok: true }),
-    score: () => ok({ outcomes, dispatches: [], score: null }), promptChanges: () => ok([promptChange]), decidePrompt: () => ok(promptChange),
-    dispatchConf: () => ok(dispatch), saveDispatch: (c) => ok(c), team: () => ok(team) }
+    score: () => ok({ outcomes, dispatches: [], score: null }), promptChanges: () => ok([pc]),
+    decidePrompt: (id, d) => { pc = { ...pc, status: d === 'do' ? 'applied' : d }; return ok(pc) },
+    dispatchConf: () => ok({ ...dispatch, used_today: sent.length }), saveDispatch: (c) => ok(c), team: () => ok(team) }
 }

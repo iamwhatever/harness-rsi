@@ -48,6 +48,10 @@ def test_proposer_sees_counts_not_exams_and_writes_one_pending_change(data):
     with pytest.raises(ValueError, match="did not test this change"):
         propose.attach(data, card["id"], AB)
     assert propose.attach(data, card["id"], {**AB, "B": card["to"]})["ab"]["metrics"]["setter_hit_rate"]["verdict"] == "same"
+    # the card carries when and how the A/B ran, so Needs you can show it; an older A/B has neither
+    got = propose.attach(data, card["id"], {**AB, "B": card["to"], "ran_at": "2026-10-08T09:00:00+00:00", "command": "python3 crew/ab.py --agent x"})["ab"]
+    assert (got["ran_at"], got["command"]) == ("2026-10-08T09:00:00+00:00", "python3 crew/ab.py --agent x")
+    assert [c["ab"]["ran_at"] for c in prompt_changes.read()] == ["2026-10-08T09:00:00+00:00"]
 
 
 @pytest.mark.parametrize("reply", [{"prompt": "Write exam_bank_hidden_probe again.", "summary": "x"},

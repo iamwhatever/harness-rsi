@@ -83,7 +83,8 @@ def attach(data: Path, change_id: str, ab: dict) -> dict:
     if (ab["agent"], ab["B"]) != (card["agent"], card["to"]):
         raise ValueError("that A/B did not test this change")
     card["ab"] = {"rounds": ab["rounds"], "reps": ab["reps"], "A": ab["A"], "B": ab["B"],
-                  "metrics": {m: {k: v[k] for k in ("A", "B", "verdict")} for m, v in ab["metrics"].items()}}
+                  "metrics": {m: {k: v[k] for k in ("A", "B", "verdict")} for m, v in ab["metrics"].items()},
+                  "ran_at": ab.get("ran_at"), "command": ab.get("command")}
     save(data, card)
     return card
 
