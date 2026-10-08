@@ -73,9 +73,14 @@ def test_demo_mode_boots_the_page_on_fixtures_and_every_string_is_in_the_table(t
     assert r.returncode == 0 and "page ok" in r.stdout, r.stderr
 
 
+def test_work_tab_rows_steps_ci_and_flags(tmp_path):
+    r = run_check(tmp_path, "work_check.mjs")
+    assert r.returncode == 0 and "work ok" in r.stdout, r.stderr
+
+
 def test_no_motion_of_our_own():
     """Motion comes only from host components, which honour prefers-reduced-motion."""
-    for f in ("index.mjs", "v2.mjs"):
+    for f in ("index.mjs", "v2.mjs", "home.mjs", "work.mjs"):
         src = (ROOT / "ui" / f).read_text(encoding="utf-8")
         assert not any(w in src for w in ("animate-", "transition", "@keyframes", "animation")), f
 

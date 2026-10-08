@@ -11,6 +11,7 @@ import { demoSource, isDemo } from './fake-data.mjs'
 import { HarnessRsiV2, isUxV2 } from './v2.mjs'
 import { Home } from './home.mjs'
 import { Needs } from './needs.mjs'
+import { Work } from './work.mjs'
 
 const { History, Inbox, Radio, Users, Wand2 } = Lucide
 const BASE = '/api/apps/harness-rsi'
@@ -326,7 +327,7 @@ export function Team({ team }) {
 }
 
 /** Home first (docs/design/ux-v2.md); the other tabs stay until the v2 Needs-you and Work tabs replace them. */
-export const TABS = ['home', 'needs', 'board', 'signals', 'rounds', 'prompts', 'team', 'settings']
+export const TABS = ['home', 'needs', 'work', 'board', 'signals', 'rounds', 'prompts', 'team', 'settings']
 const why = (e) => String(e?.message || e)
 const clock = (s) => new Date(s * 1000).toLocaleTimeString(getLang(), { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
 /** One line for the GitHub job (it runs for minutes after a refresh). */
@@ -431,6 +432,7 @@ export function HarnessRsi({ src, demo = false }) {
     home: () => [h(Home, { key: 'home', round, sched, settings: form?.saved, job, disp, signals: data.signals, changes: changes || [], readAt,
       go: setTab, armed, setArmed, runRound })],
     needs: () => [h(Needs, { key: 'needs', proposals: data.proposals, signals: data.signals, out, disp, changes, team, sched, readAt, results, onDecide: decide, onDispatch: dispatchCards, onPrompt: decidePrompt })],
+    work: () => [h(Work, { key: 'w', proposals: data.proposals, out, team, onScore: score, scoreBusy: scoreRunning(out), scoreLine: scoreJobText(out?.score) })],
     board: () => [toolbar(h(UI.Btn, { type: 'button', onClick: score, disabled: scoreRunning(out) }, t('scorePrs')), h('span', { className: MUTED, 'data-testid': 'score-job' }, scoreJobText(out?.score))),
       h(Board, { proposals: data.proposals, images: data.images, signals: data.signals, onDecide: decide, outcomes: out?.outcomes, onLink: linkPr, dispatches: out?.dispatches,
         onDispatch: dispatchCards, results, selected, onSelect: select })],

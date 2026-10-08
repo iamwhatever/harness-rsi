@@ -190,6 +190,22 @@ const en = {
   home_abFrom: 'A/B: offline replay of rounds {rounds}, {reps} runs each, by',
   home_proposedAt: 'proposed {at}',
   home_noAb: 'No A/B yet. A prompt change brings one.',
+  // Work tab (ui/work.mjs)
+  tab_work: 'Work',
+  work_note: 'One row per card you picked, from pick to merge to score. CI is the check rollup of the PR head.',
+  work_flagsNote: 'Flags and notes are what the crew reported (self-reported).',
+  work_ciError: 'CI not read just now: {e}. Showing the last read.',
+  work_empty: 'Nothing in progress',
+  work_emptyNext: 'Next step: pick a card with Do on the Board.',
+  work_step_picked: 'Picked', work_step_chat: 'Chat', work_step_pr: 'PR', work_step_ci: 'CI', work_step_merged: 'Merged', work_step_judge: 'Score',
+  work_noCard: 'No card',
+  work_noCardPr: 'PR #{n} (no card)',
+  work_lostCard: 'PR #{n} (card {id}, not on the board)',
+  work_openChat: 'Open chat',
+  work_chatFailed: 'Not started',
+  work_ci_pass: 'pass', work_ci_fail: 'fail', work_ci_pending: 'running', work_ci_none: 'no checks', work_ci_unknown: 'not read yet',
+  work_flag_blocked: 'Blocked', work_flag_question: 'Asks you', work_flag_stale: 'Stale', work_flag_orphaned: 'Orphaned', work_flag_failed: 'Dispatch failed',
+  work_said: 'Crew says: {s}',
 }
 
 const zh = {
@@ -381,6 +397,22 @@ const zh = {
   home_abFrom: 'A/B：离线重放第 {rounds} 轮，各 {reps} 次，脚本',
   home_proposedAt: '{at} 提议',
   home_noAb: '还没有 A/B。提示词改动会带上一份。',
+  // 进行中（ui/work.mjs）
+  tab_work: '进行中',
+  work_note: '你挑的每张卡片一行，从挑选到合并到评分。CI 是 PR 最新提交的检查汇总。',
+  work_flagsNote: '标记和说明来自小组自报。',
+  work_ciError: '这次没读到 CI：{e}。显示上次读到的。',
+  work_empty: '还没有在做的',
+  work_emptyNext: '下一步：在看板上给一张卡片选「做」。',
+  work_step_picked: '已选', work_step_chat: '对话', work_step_pr: 'PR', work_step_ci: 'CI', work_step_merged: '已合并', work_step_judge: '评分',
+  work_noCard: '没有卡片',
+  work_noCardPr: 'PR #{n}（没有卡片）',
+  work_lostCard: 'PR #{n}（卡片 {id} 不在看板上）',
+  work_openChat: '打开对话',
+  work_chatFailed: '没开成',
+  work_ci_pass: '通过', work_ci_fail: '没通过', work_ci_pending: '在跑', work_ci_none: '没有检查', work_ci_unknown: '还没读',
+  work_flag_blocked: '受阻', work_flag_question: '在问你', work_flag_stale: '没更新', work_flag_orphaned: '没人管', work_flag_failed: '派发失败',
+  work_said: '小组说：{s}',
 }
 
 export const TABLE = { en, zh }
