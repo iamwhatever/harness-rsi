@@ -8,6 +8,7 @@ import * as UI from '@kirocrew/app-sdk/ui'
 import Lucide from 'lucide-react'
 import { getLang, has, pickLang, setLang, t } from './strings.mjs'
 import { demoSource, isDemo } from './fake-data.mjs'
+import { HarnessRsiV2, isUxV2 } from './v2.mjs'
 
 const { History, Inbox, Radio, Users, Wand2 } = Lucide
 const BASE = '/api/apps/harness-rsi'
@@ -455,12 +456,13 @@ export function HarnessRsi({ src, demo = false }) {
       h('div', { role: 'region', 'aria-label': t(`tab_${tab}`), 'data-testid': `panel-${tab}` }, body))))
 }
 
-/** The installed page: the backend is the data source, or the fixtures with `?demo=1`. */
+/** The installed page: the backend is the data source, or the fixtures with `?demo=1`.
+ *  `?demo=1&ux=v2` shows the UX v2 mockup (ui/v2.mjs) on the fixtures; `ux=v2` alone changes nothing. */
 export default function HarnessRsiPage() {
   sdk.useLanguageGeneration?.()
   setLang(pickLang(sdk.activeLocale?.()))
   const api = sdk.useAppApi()
   const demo = isDemo(globalThis.location?.search)
   const src = useMemo(() => (demo ? demoSource() : backendSource(api)), [api, demo])
-  return h(HarnessRsi, { src, demo })
+  return demo && isUxV2(globalThis.location?.search) ? h(HarnessRsiV2, { src }) : h(HarnessRsi, { src, demo })
 }

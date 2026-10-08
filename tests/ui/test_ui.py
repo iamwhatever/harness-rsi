@@ -75,8 +75,9 @@ def test_demo_mode_boots_the_page_on_fixtures_and_every_string_is_in_the_table(t
 
 def test_no_motion_of_our_own():
     """Motion comes only from host components, which honour prefers-reduced-motion."""
-    src = (ROOT / "ui" / "index.mjs").read_text(encoding="utf-8")
-    assert not any(w in src for w in ("animate-", "transition", "@keyframes", "animation"))
+    for f in ("index.mjs", "v2.mjs"):
+        src = (ROOT / "ui" / f).read_text(encoding="utf-8")
+        assert not any(w in src for w in ("animate-", "transition", "@keyframes", "animation")), f
 
 
 def test_ui_names_only_the_lucide_icons_the_host_stub_exports():
