@@ -15,7 +15,7 @@ const byTest = (tree, id) => all(tree).filter((n) => n.props['data-testid'] === 
 const text = (n) => all([n]).flatMap((x) => x.children.filter((c) => typeof c === 'string')).join('')
 const tabTo = async (render, tree, tab) => { all(tree).find((n) => n.props['data-tab'] === tab).props.onClick(); return __settle(render) }
 
-assert.equal(TABS[1], 'work', 'Work is the tab after Home')
+assert.equal(TABS[2], 'work', 'Work is the tab after Needs you')
 // Rows: picked cards hottest first (Do, or decided with a PR), then the PR no card owns.
 const out = { outcomes, dispatches: [], ci }
 const rows = workRows({ proposals, out, team })

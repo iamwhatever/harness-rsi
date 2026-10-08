@@ -56,15 +56,18 @@ assert.ok(byTest(demo.home, 'src').length >= 10, 'every number names its source'
   assert.equal(byTest(there, 'slack-configured').length, 1, 'Fix in Settings opens Settings')
   await tabTo(page, there, 'home')
 }
-// Signals, Rounds and Team are tabs no more: they fold into Home's Details; Board and Prompt changes stay until Needs you lands.
-assert.deepEqual(TABS, ['home', 'work', 'board', 'prompts', 'settings'])
-assert.equal(byTest(demo.board, 'proposal-card').length, proposals.length)
+// Four tabs: Signals, Rounds and Team fold into Home's Details; cards and prompt changes wait in Needs you, picked cards are in Work.
+assert.deepEqual(TABS, ['home', 'needs', 'work', 'settings'])
+assert.ok(Object.values(demo).every((tree) => byTest(tree, 'proposal-card').length === 0 && byTest(tree, 'prompt-change-card').length === 0),
+  'no tab shows the old board cards or prompt-change cards')
 assert.equal(byTest(demo.home, 'run-row').length, 2)
 assert.equal(byTest(demo.home, 'details-refresh').length, 1, 'Refresh signals is in Details')
 assert.equal(byTest(demo.home, 'slack-off').length, 1)
 assert.equal(byTest(demo.home, 'round-job').length, 1)
 assert.equal(byTest(demo.home, 'regress').length, 1)
-assert.equal(byTest(demo.prompts, 'prompt-change-card').length, 1)
+// A prompt change shows its diff in Needs you, so Switch to B is decided on what B says.
+assert.equal(byTest(demo.needs, 'need-diff').length, 1)
+assert.ok(all(byTest(demo.needs, 'need-diff')).some((n) => n.type === 'pre' && n.children.join('') === promptChange.diff))
 assert.equal(byTest(demo.settings, 'slack-configured').length, 1)
 const dteam = byTest(demo.home, 'details-team')
 assert.equal(dteam.length, 1, 'the Team tree is in Details')
@@ -74,32 +77,22 @@ assert.deepEqual(byTest(dteam, 'need').map((n) => n.props['data-why']), ['questi
 assert.equal(byTest(dteam, 'team-lane').length, 3, 'two lanes under the lead, one loose')
 assert.equal(byTest(dteam, 'stale-reporter').length, 2)
 assert.ok(byTest(dteam, 'session-link').every((a) => a.props.href.startsWith('/chat?slot=')))
-assert.ok(byTest(demo.board, 'score').length >= 1, 'demo cards show the fixture judge scores')
-assert.ok(byTest(demo.board, 'sources')[0].children.some((a) => a?.props?.href === signals[0].links[0]), 'a card links its signal source')
-// Demo Dispatch: Do with auto-dispatch off says how to start it; Dispatch all Do starts the Do cards inline, within the cap.
+assert.ok(all([byTest(demo.needs, 'need-item').find((n) => n.props['data-kind'] === 'pick')]).some((a) => a.type === 'a' && a.props.href === signals[0].links[0]),
+  'a card to pick links its signal source')
+// Demo Do with auto-dispatch off says where to start it: the card moves to Start in Needs you.
 {
   const dsrc = demoSource()
   const page2 = () => expand(h(HarnessRsi, { src: dsrc, demo: true }))
-  let tree = await tabTo(page2, await __settle(page2, true), 'board')
-  const fresh = proposals.find((p) => !p.decision)
-  const card = byTest(tree, 'proposal-card').find((c) => c.props['data-id'] === fresh.id)
-  const doBtn = all([card]).find((n) => n.props['data-decision'] === 'do')
-  doBtn.props.onClick()
+  let tree = await tabTo(page2, await __settle(page2, true), 'needs')
+  const pick = byTest(tree, 'need-item').find((n) => n.props['data-kind'] === 'pick')
+  all([pick]).find((n) => n.props['data-testid'] === 'need-action').props.onClick()
   tree = await __settle(page2)
   const noteText = (t) => byTest(t, 'note').map((n) => n.children.join('')).join('')
-  assert.equal(noteText(tree), 'Saved. Not started: use Dispatch or turn on auto-dispatch.')
-  const want = proposals.filter((p) => p.decision === 'do').length + 1
-  assert.equal(byTest(tree, 'dispatch-btn').length, want)
-  byTest(tree, 'dispatch-all')[0].props.onClick()
-  tree = await __settle(page2)
-  const got = byTest(tree, 'dispatch-result').map((n) => n.props['data-result'])
-  assert.deepEqual(got.sort(), ['started', 'started', ...Array(Math.max(0, want - 2)).fill('over_cap')].sort())
-  assert.ok(byTest(tree, 'dispatch-result').filter((n) => n.props['data-result'] === 'started')
-    .every((n) => all([n]).some((a) => a.type === 'a' && a.props.href.startsWith('/chat?slot=rsi-demo-'))))
-  assert.match(noteText(tree), /^Dispatch: 2 of \d+ started$/)
+  assert.equal(noteText(tree), 'Saved. Not started: start its worker chat in Needs you, or turn on auto-dispatch.')
+  assert.ok(byTest(tree, 'need-item').some((n) => n.props['data-kind'] === 'start' && n.props['data-id'] === pick.props['data-id']))
 }
 
-// Without the flag the page reads the backend only: an empty backend is an empty board, never the fixtures.
+// Without the flag the page reads the backend only: an empty backend is an empty queue, never the fixtures.
 globalThis.location = { search: '' }
 const reads = []
 const none = { proposals: [], signals: [], changes: [], settings: { command_set: false, channels: [], window_days: 14, workspace_url: '' },
@@ -110,19 +103,19 @@ const liveHome = await __settle(page, true)
 assert.ok(byTest(liveHome, 'setup-step').every((n) => n.props['data-ok'] !== 'true'), 'an empty backend has no step done')
 assert.ok(reads.includes('/api/apps/harness-rsi/schedule'))
 assert.equal(byTest(liveHome, 'setup-refresh').length, 1, 'the GitHub step fixes itself with Refresh signals, no Signals tab')
-const live = await tabTo(page, liveHome, 'board')
+const live = await tabTo(page, liveHome, 'needs')
 assert.equal(byTest(live, 'demo-note').length, 0)
-assert.equal(byTest(live, 'proposal-card').length, 0)
-assert.equal(byTest(live, 'empty-state').length, 1)
+assert.equal(byTest(live, 'need-item').length, 0)
+assert.equal(byTest(live, 'needs-empty').length, 1)
 assert.equal(byTest(liveHome, 'team-item').length, 0, 'an empty backend is an empty Team tree, never the fixtures')
 assert.equal(byTest(await tabTo(page, live, 'work'), 'work-row').length, 0, 'an empty backend is an empty Work tab, never the fixtures')
 assert.ok(reads.includes('/api/apps/harness-rsi/team'))
 assert.ok(reads.includes('/api/apps/harness-rsi/proposals'))
 // A failing backend is an error notice, not a blank page or a silent fallback to fixtures.
 globalThis.__api = { get: async () => { throw new Error('502 Bad Gateway') }, post: async () => ({}) }
-const broken = await tabTo(page, await __settle(page, true), 'board')
+const broken = await tabTo(page, await __settle(page, true), 'needs')
 assert.equal(byTest(broken, 'load-error').length, 1)
-assert.equal(byTest(broken, 'proposal-card').length, 0)
+assert.equal(byTest(broken, 'need-item').length, 0)
 
 // (2) One string table. Data values may appear as they are; everything else must come from the table.
 const data = new Set()
@@ -229,8 +222,8 @@ assert.equal(TABLE.zh.days.split(',').length, 7)
   const oldHome = await __settle(page, true)
   assert.equal(byTest(oldHome, 'ux-v2').length, 0)
   assert.equal(byTest(oldHome, 'home-status').length, 1)
-  const old = await tabTo(page, oldHome, 'board')
-  assert.equal(byTest(old, 'proposal-card').length, proposals.length)
+  const old = await tabTo(page, oldHome, 'needs')
+  assert.equal(byTest(old, 'need-item').length, 6)
   // Every v2 word is in the table too.
   for (const lang of ['qa', 'en', 'zh']) {
     setLang(lang)

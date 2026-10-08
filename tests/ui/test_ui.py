@@ -1,4 +1,4 @@
-"""Harness RSI app page: opt-in manifest, fake data = fixtures, board behaviour (node)."""
+"""Harness RSI app page: opt-in manifest, fake data = fixtures, page behaviour (node)."""
 
 import json
 import re
@@ -63,9 +63,9 @@ def run_check(tmp_path, script):
     return subprocess.run([node, script], cwd=tmp_path, capture_output=True, text=True, timeout=60)
 
 
-def test_board_renders_every_proposal_and_writes_decisions(tmp_path):
-    r = run_check(tmp_path, "board_check.mjs")
-    assert r.returncode == 0 and "board ok" in r.stdout, r.stderr
+def test_backend_source_forms_and_status_lines(tmp_path):
+    r = run_check(tmp_path, "source_check.mjs")
+    assert r.returncode == 0 and "source ok" in r.stdout, r.stderr
 
 
 def test_demo_mode_boots_the_page_on_fixtures_and_every_string_is_in_the_table(tmp_path):

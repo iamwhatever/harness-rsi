@@ -64,7 +64,7 @@ const server = await createServer({
 await server.listen()
 const browser = await (pw.chromium || pw.default.chromium).launch({ executablePath: process.env.CHROMIUM_PATH || undefined })
 const errors = []
-const TABS = { en: ['Home', 'Needs you', 'Work', 'Board', 'Prompt changes', 'Settings'], zh: ['首页', '等你处理', '进行中', '看板', '提示词改动', '设置'] }[LANG]
+const TABS = { en: ['Home', 'Needs you', 'Work', 'Settings'], zh: ['首页', '等你处理', '进行中', '设置'] }[LANG]
 try {
   const page = await browser.newPage({ viewport: { width: W, height: 900 }, reducedMotion: 'reduce', locale: LANG === 'zh' ? 'zh-CN' : 'en-US' })
   page.on('pageerror', (e) => errors.push(e.message))
@@ -122,29 +122,12 @@ try {
   await shoot('work')
   if (process.env.RSI_ONLY === 'work') throw 'done'
   await pickTab(TABS[3])
-  const cards = page.getByTestId('proposal-card')
-  await cards.first().waitFor({ timeout: 30000 })
-  // Keyboard: a focused decision button is pressed with Enter.
-  const doBtn = cards.first().locator('[data-decision="do"]')
-  await doBtn.focus()
-  await page.keyboard.press('Enter')
-  await page.waitForFunction(() => document.querySelector('[data-testid="proposal-card"] [data-decision="do"]')?.getAttribute('aria-pressed') === 'true')
-    .catch(() => errors.push('Enter did not press Do'))
-  await shoot('board')
-  // Manual dispatch: Dispatch all Do starts the Do cards inline (demo: no chat opens), within the daily cap.
-  await page.getByTestId('dispatch-all').click()
-  await page.getByTestId('dispatch-result').first().waitFor()
-  await shoot('board-dispatched')
-  for (const [i, name] of ['prompts', 'settings'].entries()) {
-    await pickTab(TABS[i + 4])
-    await page.getByTestId(`panel-${name}`).waitFor()
-    if (name === 'prompts') await page.getByTestId('prompt-change-card').locator('summary').click()
-    await shoot(name)
-  }
+  await page.getByTestId('panel-settings').waitFor()
+  await shoot('settings')
 } catch (e) { if (e !== 'done') errors.push(String(e)) } finally {
   await browser.close()
   await server.close()
   fs.rmSync(tmp, { recursive: true, force: true })
 }
 if (errors.length) { console.error(errors.join('\n')); process.exit(1) }
-console.log(`wrote ${V2 ? 5 : ({ home: 2, needs: 3, work: 4 })[process.env.RSI_ONLY] || 8} shots for ${LANG} at ${W}px to ${OUT}`)
+console.log(`wrote ${V2 ? 5 : ({ home: 2, needs: 3, work: 4 })[process.env.RSI_ONLY] || 5} shots for ${LANG} at ${W}px to ${OUT}`)

@@ -79,6 +79,8 @@ function promptParts(c, { onPrompt }) {
     h('div', { key: 's', className: MUTED, 'data-testid': 'ab-source' }, ...abSource(c.ab))]
     : [h('div', { key: 'n', className: MUTED }, t('noAb'))]
   return [`${c.agent}: ${c.summary}`, ...evidence,
+    h('details', { className: 'mt-2', 'data-testid': 'need-diff' }, h('summary', { className: MUTED }, t('showDiff')),
+      h('pre', { className: 'text-[12px] whitespace-pre-wrap overflow-x-auto' }, c.diff)),
     h('div', { className: MUTED }, t('needs_proposed', { at: at(c.at) }), ' ', h(Src, { route: '/prompt-changes', when: c.at })),
     row(h(UI.Btn, { type: 'button', primary: true, 'data-testid': 'need-action', onClick: () => onPrompt(c.id, 'do') }, t('needs_actApply')),
       h(UI.Btn, { type: 'button', 'data-testid': 'need-skip', onClick: () => onPrompt(c.id, 'skip') }, t('dec_skip')),

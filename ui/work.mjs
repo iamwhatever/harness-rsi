@@ -27,7 +27,7 @@ export function teamItems(team) {
 
 /** The worker chat of a row: its dispatch row's session, else the one the outcome ledger kept. */
 const sessionOf = (d, o) => d?.session || o?.dispatch?.session || null
-/** The owner's choice for a card: the board's decision, else the one the outcome ledger copied. */
+/** The owner's choice for a card: its decision, else the one the outcome ledger copied. */
 const choiceOf = (p, o) => p?.decision || o?.decision || null
 
 /** One row per picked card (Do, or decided with a linked PR), hottest first; then PRs no known card owns. */
