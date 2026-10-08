@@ -44,7 +44,7 @@ def validate(patch, current):
     return new, errors
 
 
-def read():
+def saved():
     """The owner's settings; no vault (tests, a bare CLI) or a bad value reads as off."""
     try:
         secret = settings._vault().get(VAULT_NAME)
@@ -54,12 +54,23 @@ def read():
     return DEFAULTS if errors else new
 
 
-def write(conf):
-    settings._vault().set_sync(VAULT_NAME, json.dumps({k: conf[k] for k in DEFAULTS}))
+def read(clock=None):
+    """``GET /dispatch``: the settings plus ``used_today``, the dispatches the daily cap has counted today (UTC)."""
+    return {**saved(), "used_today": used_today(clock or now)}
+
+
+def write(new):
+    settings._vault().set_sync(VAULT_NAME, json.dumps({k: new[k] for k in DEFAULTS}))
 
 
 def now():
     return dt.datetime.now(dt.timezone.utc)
+
+
+def used_today(clock=now):
+    """How many dispatch attempts started today (UTC): one ``pending`` row each, which is what the cap counts."""
+    day = clock().date().isoformat()
+    return sum(1 for r in store._jsonl(FILE) if isinstance(r, dict) and r.get("state") == "pending" and str(r.get("at", "")).startswith(day))
 
 
 def rows():
@@ -89,8 +100,7 @@ def claim(card_id, conf, clock=now, record=True):
         if old and old["state"] in ("pending", "dispatched"):
             return old, "already"
         t = clock()
-        day = t.date().isoformat()  # each attempt writes one pending row: that is what the cap counts
-        today = sum(1 for r in store._jsonl(FILE) if isinstance(r, dict) and r.get("state") == "pending" and str(r.get("at", "")).startswith(day))
+        today = used_today(lambda: t)
         row = {"card_id": card_id, "repo": TARGET, "state": "pending", "session": None, "error": "", "at": t.isoformat(timespec="seconds")}
         if TARGET not in conf["repos"]:
             bad = {**row, "state": "error", "error": f"{TARGET} is not on the allowlist in Settings"}

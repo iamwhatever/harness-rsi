@@ -100,3 +100,18 @@ def test_a_head_failure_names_its_error_class_not_the_exam(tmp_path):
     assert ab.error_class(check, tmp_path) == "ModuleNotFoundError"
     assert ab.error_class({"kind": "exit_code", "cmd": ["false"], "expect": 0}, tmp_path) == "exit 1"
     assert ab.error_class({"kind": "file_assert"}, tmp_path) == "file_assert"
+
+
+def test_an_ab_result_records_when_and_how_it_ran(tmp_path):
+    sigs, trees = setup(tmp_path)
+    call = lambda agent, text, message: (setter_reply(sigs, "fixed.txt"), 1.0)  # noqa: E731
+    cmd = "python3 crew/ab.py --agent rsi-question-setter --variant b.md --kirocrew KiroCrew --rounds 3 --reps 1"
+    out = ab.run(tmp_path, SETTER, prompts.effective(tmp_path)[SETTER] + "\nB.", call, trees, [3], 1, command=cmd)
+    assert out["command"] == cmd and out["ran_at"] <= out["at"] and out["ran_at"].endswith("+00:00")
+
+
+def test_the_recorded_command_names_files_not_local_paths():
+    import argparse
+    args = argparse.Namespace(agent=SETTER, variant=pathlib.Path("/home/someone/drafts/b.md"), kirocrew=pathlib.Path("/src/KiroCrew"),
+                              rounds=[3, 4], reps=2)
+    assert ab.command_line(args) == f"python3 crew/ab.py --agent {SETTER} --variant b.md --kirocrew KiroCrew --rounds 3 4 --reps 2"

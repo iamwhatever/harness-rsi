@@ -147,7 +147,9 @@ def replay(data: Path, agent: str, texts: dict, call: Call, signals: list[dict],
 
 
 def run(data: Path, agent: str, variant: str, call: Call, trees: Callable, rounds: list[int], reps: int,
-        merged_at: dict | None = None, facts: Callable | None = None) -> dict:
+        merged_at: dict | None = None, facts: Callable | None = None, command: str = "") -> dict:
+    """The A/B result: per metric A, B and a verdict; ``ran_at`` (start, UTC) and ``command`` say when and how it ran."""
+    ran_at = dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")
     if found := prompts.leaks(variant, prompts.bank(data)):
         raise ValueError(f"variant names {len(found)} exam(s); exams never go into prompts")
     texts = prompts.effective(data)
@@ -168,7 +170,8 @@ def run(data: Path, agent: str, variant: str, call: Call, trees: Callable, round
     metrics = {m: {"A": mean(a), "B": mean(samples["B"][m]), "verdict": verdict(m, a, samples["B"][m]),
                    "samples": {"A": a, "B": samples["B"][m]}} for m, a in samples["A"].items()}
     return {"agent": agent, "A": prompts.version(texts[agent]), "B": prompts.version(variant), "rounds": sorted(saved_rounds(data, rounds)),
-            "reps": reps, "metrics": metrics, "failures": {k: dict(v) for k, v in why.items()}, "at": dt.datetime.now(dt.timezone.utc).isoformat()}
+            "reps": reps, "metrics": metrics, "failures": {k: dict(v) for k, v in why.items()}, "at": dt.datetime.now(dt.timezone.utc).isoformat(),
+            "ran_at": ran_at, "command": command}
 
 
 def kiro_call(run_dir: Path) -> Call:
@@ -206,6 +209,12 @@ def merged_dates(data: Path) -> dict:  # KiroCrew PR number -> mergedAt, for the
     return {k[1:]: (v or {}).get("mergedAt") for k, v in json.loads(out)["data"]["repository"].items()}
 
 
+def command_line(args: argparse.Namespace) -> str:
+    """The command as the owner would rerun it: file names only, so no local path reaches the page."""
+    return (f"python3 crew/ab.py --agent {args.agent} --variant {args.variant.name} --kirocrew {args.kirocrew.name} "
+            f"--rounds {' '.join(map(str, args.rounds))} --reps {args.reps}")
+
+
 def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--agent", required=True, choices=[rr.SETTER, *reduce.REVIEWERS])
@@ -217,7 +226,7 @@ def main(argv: list[str]) -> int:
     data = Path(os.environ.get("HARNESS_RSI_DATA", Path.home() / ".kiro/crew/harness-rsi-data"))
     out = run(data, args.agent, args.variant.read_text(encoding="utf-8"), kiro_call(data / "ab" / ".run"),
               tree_maker(args.kirocrew, data / "ab" / "trees"), args.rounds, args.reps,
-              merged_dates(data) if args.agent != rr.SETTER else {}, rr.setter_facts(args.kirocrew, data / "exams"))
+              merged_dates(data) if args.agent != rr.SETTER else {}, rr.setter_facts(args.kirocrew, data / "exams"), command_line(args))
     (data / "ab" / f"{args.agent}-{out['A']}-{out['B']}.json").write_text(json.dumps(out, indent=1) + "\n", encoding="utf-8")
     print(json.dumps({m: {k: v[k] for k in ("A", "B", "verdict")} for m, v in out["metrics"].items()}))
     return 0

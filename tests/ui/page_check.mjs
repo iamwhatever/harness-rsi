@@ -6,6 +6,7 @@ import fs from 'node:fs'
 import { createElement as h, __settle } from 'react'
 import Page, { HarnessRsi, TABS } from './ui/index.mjs'
 import { checklist, lastRound, nextLine, roundCost } from './ui/home.mjs'
+import { leftToday, needsQueue } from './ui/needs.mjs'
 import { TABLE, setLang } from './ui/strings.mjs'
 import { demoSource, promptChange, team } from './ui/fake-data.mjs'
 
@@ -258,5 +259,63 @@ assert.equal(TABLE.zh.days.split(',').length, 7)
   assert.match(steps[1].text, /^GitHub: failed at .+ \(github: OSError\)$/)
   assert.equal(steps[2].text, 'The last round could not read your chats (sessions: OSError).')
   assert.match(steps[4].text, /^Risk: a trusted chat runs tools without asking you/)
+}
+// (5) Needs you: one queue, right after Home, of everything waiting on the owner; each item has why, evidence and one action.
+{
+  setLang('en')
+  assert.equal(TABS[1], 'needs', 'Needs you comes right after Home')
+  const nsrc = demoSource()
+  const render = () => expand(h(HarnessRsi, { src: nsrc, demo: true }))
+  let tree = await tabTo(render, await __settle(render, true), 'needs')
+  const kinds = (tr) => byTest(tr, 'need-item').map((n) => n.props['data-kind'])
+  const item = (tr, kind) => byTest(tr, 'need-item').find((n) => n.props['data-kind'] === kind)
+  const text = (n) => all([n]).flatMap((x) => x.children.filter((c) => typeof c === 'string' || typeof c === 'number')).join('')
+  assert.deepEqual(kinds(tree), ['pick', 'start', 'prompt', 'question', 'blocked', 'merge'])
+  for (const n of byTest(tree, 'need-item')) {
+    assert.equal(all([n]).filter((x) => x.props['data-testid'] === 'need-action').length, 1, `${n.props['data-kind']}: one action`)
+    assert.equal(all([n]).filter((x) => x.props['data-primary']).length <= 1, true, `${n.props['data-kind']}: at most one primary button`)
+    assert.equal(all([n]).filter((x) => x.props['data-testid'] === 'need-why').length, 1, `${n.props['data-kind']}: says why`)
+    assert.ok(all([n]).some((x) => x.props['data-testid'] === 'src'), `${n.props['data-kind']}: names its source`)
+  }
+  // A pick offers Do / Skip / Later; Start says how many are left today (daily_cap - used_today from GET /dispatch).
+  assert.deepEqual(['need-action', 'need-skip', 'need-later'].map((k) => all([item(tree, 'pick')]).filter((x) => x.props['data-testid'] === k).length), [1, 1, 1])
+  assert.match(text(item(tree, 'start')), /2 left today\./)
+  // A prompt change shows the A/B numbers with when it ran and the command.
+  const ab = all([item(tree, 'prompt')]).find((x) => x.props['data-testid'] === 'ab-source')
+  assert.match(text(ab), /^A\/B: offline replay of rounds 3, 4, 3 runs each; ran .+ with python3 crew\/ab\.py /)
+  assert.equal(all([ab]).find((x) => x.type === 'code').children.join(''), promptChange.ab.command)
+  // Team items: question and blocked open their chat; merge links the PR on the one allowlisted repo.
+  const href = (kind) => all([item(tree, kind)]).find((x) => x.props['data-testid'] === 'need-action').props.href
+  assert.equal(href('question'), '/chat?slot=chat-fake-lane-exam')
+  assert.equal(href('merge'), 'https://github.com/example-org/example-repo/pull/101')
+  assert.match(text(item(tree, 'question')), /Two exams flake; retire them\?/, 'a question shows the worker summary')
+  // Do on a pick moves it to Start; Start opens the chat and the card leaves, and the count left drops.
+  all([item(tree, 'pick')]).find((x) => x.props['data-testid'] === 'need-action').props.onClick()
+  tree = await __settle(render)
+  assert.deepEqual(kinds(tree), ['start', 'start', 'prompt', 'question', 'blocked', 'merge'])
+  const startId = item(tree, 'start').props['data-id']
+  all([item(tree, 'start')]).find((x) => x.props['data-testid'] === 'need-action').props.onClick()
+  tree = await __settle(render)
+  assert.ok(!byTest(tree, 'need-item').some((n) => n.props['data-id'] === startId), 'a started card leaves the queue')
+  assert.match(text(item(tree, 'start')), /1 left today\./)
+  // Switch to B applies the change and it leaves the queue.
+  all([item(tree, 'prompt')]).find((x) => x.props['data-testid'] === 'need-action').props.onClick()
+  tree = await __settle(render)
+  assert.ok(!kinds(tree).includes('prompt'))
+  // The queue on its own: an error row is a Start with its reason; an older A/B without ran_at says so; no used_today = unknown.
+  assert.equal(leftToday({ daily_cap: 2, used_today: 5 }), 0)
+  assert.equal(leftToday({ daily_cap: 2 }), null)
+  const q = needsQueue({ proposals: [{ ...proposals[2], decision: 'do' }], out: { dispatches: [{ card_id: proposals[2].id, state: 'error', error: 'boom', at: 'x' }] },
+    disp: { daily_cap: 2, used_today: 2 }, changes: [{ ...promptChange, status: 'skip' }], team: null })
+  assert.deepEqual(q.map((x) => [x.kind, x.left, x.d.error]), [['start', 0, 'boom']])
+  assert.equal(needsQueue({ proposals: [{ ...proposals[2], decision: 'do' }], out: { dispatches: [{ card_id: proposals[2].id, state: 'dispatched' }] } }).length, 0)
+  const { abSource } = await import('./ui/needs.mjs')
+  assert.match(abSource({ rounds: [1], reps: 2 }).filter((x) => typeof x === 'string').join(''), /run time not recorded; script/)
+  // An empty backend is an empty queue that names the next round.
+  globalThis.location = { search: '' }
+  globalThis.__api = { get: async () => none, post: async () => ({ ok: true }) }
+  const empty = await tabTo(page, await __settle(page, true), 'needs')
+  assert.equal(byTest(empty, 'need-item').length, 0)
+  assert.equal(text(byTest(empty, 'needs-empty')[0]), 'Nothing needs youNext round: none, the weekly round is off. Turn it on in Settings.')
 }
 console.log('page ok')

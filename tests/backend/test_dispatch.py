@@ -47,7 +47,7 @@ def do(card=CARD, decision="do"):
 
 
 def test_off_by_default_dispatches_nothing(opened, tmp_path):
-    assert dispatch.read() == dispatch.DEFAULTS and dispatch.DEFAULTS["auto_dispatch"] is False
+    assert dispatch.read() == {**dispatch.DEFAULTS, "used_today": 0} and dispatch.DEFAULTS["auto_dispatch"] is False
     assert do() == (200, {"ok": True, "appended": True})
     assert opened == [] and not (tmp_path / dispatch.FILE).exists()
 
@@ -120,7 +120,7 @@ def test_a_prompt_change_card_never_dispatches(opened, monkeypatch, tmp_path):
 
 
 def test_settings_are_owner_only_and_validated(opened, monkeypatch):
-    assert call(routes._dispatch_get)[1]["dispatch"] == dispatch.DEFAULTS
+    assert call(routes._dispatch_get)[1]["dispatch"] == {**dispatch.DEFAULTS, "used_today": 0}
     assert call(routes._dispatch_post, Req({"auto_dispatch": True}, internal_auth=True))[0] == 403
     for bad in ({"auto_dispatch": "yes"}, {"trust_dispatched": 1}, {"daily_cap": 0}, {"daily_cap": 11}, {"repos": ["not a repo"]}, {"repos": "o/r"}):
         assert call(routes._dispatch_post, Req(bad))[0] == 400, bad
@@ -319,3 +319,26 @@ def test_the_lead_checks_trust_first_and_files_its_lanes():
 def test_every_lane_files_its_workers_in_its_own_subfolder(lane):
     text = (AGENTS / "prompts" / f"rsi-lane-{lane}.md").read_text(encoding="utf-8")
     assert f'every session_create you make passes folder "Harness RSI/rounds/<round>/{lane}"' in text
+
+
+def test_get_dispatch_says_how_many_dispatches_the_cap_counted_today(opened, tmp_path):
+    """``used_today`` counts today's pending rows (one per attempt, what the cap counts), never another day's or a refusal."""
+    import datetime as dt
+    rows = [{"card_id": "prop_a", "state": "pending", "at": "2026-10-08T01:00:00+00:00"},
+            {"card_id": "prop_a", "state": "dispatched", "at": "2026-10-08T01:00:05+00:00"},
+            {"card_id": "prop_b", "state": "pending", "at": "2026-10-08T23:59:00+00:00"},
+            {"card_id": "prop_c", "state": "pending", "at": "2026-10-07T23:59:00+00:00"},
+            {"card_id": "prop_d", "state": "error", "error": "daily cap of 2 reached; try tomorrow", "at": "2026-10-08T12:00:00+00:00"}]
+    (tmp_path / dispatch.FILE).write_text("".join(json.dumps(r) + "\n" for r in rows))
+    day = lambda: dt.datetime(2026, 10, 8, 18, tzinfo=dt.timezone.utc)  # noqa: E731
+    assert dispatch.used_today(day) == 2 and dispatch.read(day)["used_today"] == 2
+    assert dispatch.read(lambda: dt.datetime(2026, 10, 9, tzinfo=dt.timezone.utc))["used_today"] == 0
+
+
+def test_a_started_dispatch_counts_in_used_today_and_a_refusal_does_not(opened, monkeypatch):
+    monkeypatch.setattr(dispatch, "saved", lambda: {**dispatch.DEFAULTS, "daily_cap": 1})
+    do(FRESH)
+    assert call(routes._dispatch_get)[1]["dispatch"]["used_today"] == 0
+    assert [r["result"] for r in start(DO, FRESH)[1]["results"]] == ["started", "over_cap"]
+    got = call(routes._dispatch_get)[1]["dispatch"]
+    assert got["used_today"] == 1 and got["daily_cap"] == 1
