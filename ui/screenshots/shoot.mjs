@@ -2,6 +2,7 @@
 // theme and i18n; nothing talks to a gateway. Needs a KiroCrew website checkout:
 //   KIROCREW_WEBSITE=/path/to/KiroCrew/website node ui/screenshots/shoot.mjs
 // RSI_LANG=en|zh (host locale), RSI_W=width (default 1440), RSI_OUT=dir: every tab as <tab>-<lang>-<width>.png.
+// RSI_UX=v2: the UX v2 mockup (ui/v2.mjs) instead, every view as v2-<view>-<lang>-<width>.png.
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -12,7 +13,7 @@ const here = path.dirname(fileURLToPath(import.meta.url))
 const repo = path.resolve(here, '../..')
 const site = process.env.KIROCREW_WEBSITE
 if (!site) throw new Error('set KIROCREW_WEBSITE to a KiroCrew/website checkout')
-const [LANG, W, OUT] = [process.env.RSI_LANG || 'en', Number(process.env.RSI_W || 1440), process.env.RSI_OUT || here]
+const [LANG, W, OUT, V2] = [process.env.RSI_LANG || 'en', Number(process.env.RSI_W || 1440), process.env.RSI_OUT || here, process.env.RSI_UX === 'v2']
 const req = createRequire(path.join(site, 'package.json'))
 const load = async (m) => import(pathToFileURL(req.resolve(m)).href)
 const { createServer } = await load('vite')
@@ -35,6 +36,7 @@ fs.writeFileSync(path.join(tmp, 'main.jsx'), `import { createRoot } from 'react-
 import { initI18n } from '@host/i18n/all'
 import { activeLocale } from '@kirocrew/app-sdk'
 import { HarnessRsi } from '${path.join(repo, 'ui/index.mjs')}'
+import { HarnessRsiV2 } from '${path.join(repo, 'ui/v2.mjs')}'
 import { pickLang, setLang } from '${path.join(repo, 'ui/strings.mjs')}'
 import { demoSource } from '${path.join(repo, 'ui/fake-data.mjs')}'
 import './harness.css'
@@ -42,7 +44,7 @@ await initI18n('${LANG}')
 setLang(pickLang(activeLocale()))
 document.documentElement.setAttribute('data-theme', 'dark')
 const demo = demoSource(), src = { ...demo, load: async () => ({ ...(await demo.load()), images: { prop_bg_tasks: { before: '${before}' } } }) }
-createRoot(document.getElementById('root')).render(<div className="flex flex-col h-screen bg-bg text-text"><HarnessRsi src={src} demo /></div>)
+createRoot(document.getElementById('root')).render(<div className="flex flex-col h-screen bg-bg text-text">${V2 ? '<HarnessRsiV2 src={src} />' : '<HarnessRsi src={src} demo />'}</div>)
 `)
 // The host's stock (no edition) answer for its virtual modules, which the shared components import.
 const stockEdition = { name: 'stock-edition', enforce: 'pre', resolveId: (id) => (id.startsWith('virtual:kirocrew-') ? `\0${id}` : null),
@@ -78,6 +80,19 @@ try {
     await page.screenshot({ path: path.join(OUT, `${name}-${LANG}-${W}.png`) })
   }
   await page.goto('http://127.0.0.1:5291/index.html')
+  if (V2) {
+    const VIEWS = { en: ['Home', 'Needs you', 'Work', 'Settings'], zh: ['首页', '等你处理', '进行中', '设置'] }[LANG]
+    await page.getByTestId('v2-panel-home').getByTestId('v2-status').waitFor({ timeout: 30000 })
+    await shoot('v2-home')
+    await page.getByTestId('v2-details').locator('summary').click()
+    await shoot('v2-home-details')
+    for (const [i, name] of ['needs', 'work', 'settings'].entries()) {
+      await page.getByRole('radio', { name: new RegExp(`^${VIEWS[i + 1]}`) }).click()
+      await page.getByTestId(`v2-panel-${name}`).waitFor()
+      await shoot(`v2-${name}`)
+    }
+    throw 'done'
+  }
   const cards = page.getByTestId('proposal-card')
   await cards.first().waitFor({ timeout: 30000 })
   // Keyboard: a focused decision button is pressed with Enter.
@@ -97,10 +112,10 @@ try {
     if (name === 'prompts') await page.getByTestId('prompt-change-card').locator('summary').click()
     await shoot(name)
   }
-} catch (e) { errors.push(String(e)) } finally {
+} catch (e) { if (e !== 'done') errors.push(String(e)) } finally {
   await browser.close()
   await server.close()
   fs.rmSync(tmp, { recursive: true, force: true })
 }
 if (errors.length) { console.error(errors.join('\n')); process.exit(1) }
-console.log(`wrote 7 shots for ${LANG} at ${W}px to ${OUT}`)
+console.log(`wrote ${V2 ? 5 : 7} shots for ${LANG} at ${W}px to ${OUT}`)

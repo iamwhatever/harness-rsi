@@ -131,4 +131,83 @@ for (const [k, v] of Object.entries(TABLE.en)) {
   assert.doesNotMatch(v, /\p{Script=Han}/u, `en.${k} has Chinese`)
 }
 assert.equal(TABLE.zh.days.split(',').length, 7)
+// (3) UX v2 mockup: only with ?demo=1&ux=v2, on the fixtures; ux=v2 alone or demo alone keeps the current page.
+{
+  const { HarnessRsiV2, VIEWS } = await import('./ui/v2.mjs')
+  setLang('en')
+  const noApi = { get: async () => { throw new Error('the v2 mockup must not call the backend') }, post: async () => { throw new Error('no') } }
+  const views = async (render) => {
+    const trees = { home: await __settle(render, true) }
+    for (const v of VIEWS.slice(1)) trees[v] = await tabTo(render, trees.home, v)
+    await tabTo(render, trees.home, 'home')
+    return trees
+  }
+  globalThis.__api = noApi
+  globalThis.location = { search: '?demo=1&ux=v2' }
+  const v2 = await views(page)
+  assert.equal(byTest(v2.home, 'ux-v2').length, 1)
+  assert.equal(byTest(v2.home, 'demo-note').length, 1)
+  assert.equal(byTest(v2.home, 'proposal-card').length, 0, 'the v2 mockup is not the current board')
+  assert.equal(byTest(v2.home, 'setup-step').length, 4)
+  assert.equal(byTest(v2.home, 'primary').length, 1, 'Home has one primary action')
+  assert.equal(byTest(v2.home, 'v2-details').length, 1, 'Signals, runs and raw A/B are folded on Home')
+  assert.equal(byTest(v2.home, 'signal-row').length, signals.length)
+  const kinds = (tree) => byTest(tree, 'need-item').map((n) => n.props['data-kind'])
+  assert.deepEqual(kinds(v2.needs), ['pick', 'start', 'prompt', 'question', 'blocked', 'merge'])
+  assert.ok(byTest(v2.needs, 'need-item').every((n) => byTest([n], 'need-action').length === 1), 'every item has one action')
+  assert.ok(byTest(v2.needs, 'cost-note').length >= byTest(v2.needs, 'need-action').length, 'every action says what it costs')
+  assert.match(byTest(v2.needs, 'ab-source')[0].children.flat().join(''), /offline replay/)
+  assert.equal(byTest(v2.work, 'work-row').length, 3)
+  assert.ok(byTest(v2.work, 'work-row').every((r) => byTest([r], 'work-step').length === 6))
+  assert.ok(byTest(v2.work, 'work-step').filter((s) => s.props['data-step'] === 'ci').every((s) => s.props['data-done'] === false), 'CI is a gap')
+  assert.equal(byTest(v2.settings, 'v2-setting').length, 11)
+  // Each card lives in one place: picking moves it from Needs you to Work; starting fills its chat step.
+  {
+    const dsrc = demoSource()
+    const render = () => expand(h(HarnessRsiV2, { src: dsrc }))
+    let tree = await tabTo(render, await __settle(render, true), 'needs')
+    const pickId = byTest(tree, 'need-item').find((n) => n.props['data-kind'] === 'pick').props['data-id']
+    all(byTest(tree, 'need-item').filter((n) => n.props['data-kind'] === 'pick')).find((n) => n.props['data-testid'] === 'need-action').props.onClick()
+    tree = await __settle(render)
+    assert.ok(!kinds(tree).includes('pick'))
+    const startId = byTest(tree, 'need-item').find((n) => n.props['data-kind'] === 'start').props['data-id']
+    all(byTest(tree, 'need-item').filter((n) => n.props['data-kind'] === 'start')).find((n) => n.props['data-testid'] === 'need-action').props.onClick()
+    tree = await __settle(render)
+    assert.ok(!kinds(tree).includes('start'))
+    tree = await tabTo(render, tree, 'work')
+    const step = (id, k) => byTest(byTest(tree, 'work-row').filter((r) => r.props['data-id'] === id), 'work-step').find((s) => s.props['data-step'] === k)
+    assert.equal(byTest(tree, 'work-row').length, 4)
+    assert.equal(step(pickId, 'merged').props['data-done'], true)
+    assert.equal(step(startId, 'chat').props['data-done'], true)
+    assert.ok(all([step(startId, 'chat')]).some((a) => a.type === 'a' && a.props.href.startsWith('/chat?slot=rsi-demo-')))
+  }
+  // ux=v2 without demo is the current page over the backend; demo without ux=v2 is the current demo page.
+  globalThis.location = { search: '?ux=v2' }
+  globalThis.__api = { get: async () => none, post: async () => ({ ok: true }) }
+  const plain = await __settle(page, true)
+  assert.equal(byTest(plain, 'ux-v2').length, 0)
+  assert.equal(byTest(plain, 'demo-note').length, 0)
+  globalThis.location = { search: '?demo=1' }
+  globalThis.__api = noApi
+  const old = await __settle(page, true)
+  assert.equal(byTest(old, 'ux-v2').length, 0)
+  assert.equal(byTest(old, 'proposal-card').length, proposals.length)
+  // Every v2 word is in the table too. Text in <code> (routes, script and metric names) is an identifier, not prose.
+  const noCode = (ns) => ns.filter((n) => !(n && n.type === 'code')).map((n) => (n && typeof n === 'object' ? { ...n, children: noCode(n.children) } : n))
+  for (const lang of ['qa', 'en', 'zh']) {
+    setLang(lang)
+    const vsrc = demoSource()
+    const trees = await views(() => noCode(expand(h(HarnessRsiV2, { src: vsrc }))))
+    for (const [view, tree] of Object.entries(trees)) {
+      for (const s of shown(tree)) {
+        const rest = strip(lang === 'qa' ? unmark(s) : s)
+        if (lang === 'qa') assert.match(rest, /^[\s\d.,:;/·→—#%()+\-…]*$/u, `v2 ${view}: "${s}" is shown without the string table`)
+        if (lang === 'en') assert.doesNotMatch(rest, /\p{Script=Han}/u, `v2 ${view}: "${s}" mixes Chinese into English`)
+        if (lang === 'zh') assert.doesNotMatch(rest.replace(/Slack|GitHub|KiroCrew|MCP|PR|A\/B|ID|CI|fork|Harness|demo|\{\w+\}/g, ''),
+          /[A-Za-z]{3,}/, `v2 ${view}: "${s}" mixes English into Chinese`)
+      }
+    }
+  }
+  setLang('en')
+}
 console.log('page ok')
