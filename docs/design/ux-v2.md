@@ -103,7 +103,7 @@ flowchart LR
 | 已选 | `GET /proposals`（`decision=do`） |
 | 已开对话（链接到对话） | `GET /outcomes`（`dispatches`，或行里的 `dispatch.session`） |
 | PR | `GET /outcomes`（`pr`、`state`） |
-| CI | **缺口**：后端不读 PR 的检查结果；样稿显示「—」 |
+| CI | `GET /outcomes`（`ci.checks[pr]`：通过 / 没通过 / 在跑 / 没有检查；`backend/outcome_checks.py` 一次 GraphQL 读完，缓存 5 分钟，已合并且结果定了的不再读） |
 | 已合并 | `GET /outcomes`（`state=merged`、`merged_sha`） |
 | 评分 | `GET /outcomes`（`score.base` → `score.head`、`regress`）。写「评分：基线不通过 → 新版通过 · 01-02 10:05」 |
 
@@ -131,7 +131,7 @@ flowchart LR
 | 没有下一轮时间 | 首页「下一轮」 | 已补：`GET /schedule` 返回 `next_round_at`（用 `round_due` 同一套规则） |
 | 没有每轮时长和花费 | 「运行一轮」的花费说明 | 已补：每行写 `duration_s` 和 `cost`（额度；小组还不报时为空，页面写「不知道」）；手动一轮记为 `manual_round`；`GET /schedule` 的 `round_stats` 给近 3 轮平均 |
 | 没有 A/B 的运行时间和命令 | 「换成 B」的证据 | 已补：`crew/ab.py` 在结果里写 `ran_at`（开始时间）和 `command`（只写文件名），`crew/propose.py --attach` 把它们带到卡片上；旧的 A/B 没有，页面写「没记下」 |
-| 没有 CI 状态 | 进行中的「CI」格、合并 PR 的证据 | `GET /outcomes` 带上 PR 的检查汇总 |
+| 没有 CI 状态 | 进行中的「CI」格、合并 PR 的证据 | 已补：`GET /outcomes` 的 `ci` 带上每个 PR 的检查汇总（缓存；读失败时保留上次结果，`error` 写原因） |
 | 没有今天已用名额 | 「开工作对话」的名额说明 | 已补：`GET /dispatch` 返回 `used_today`（今天按 UTC 算，和每日上限数的是同一种行） |
 | GitHub 仓库和会话来源没有设置 | 设置的来源区 | 各加一项设置和状态 |
 

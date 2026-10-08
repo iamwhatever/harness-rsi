@@ -9,8 +9,8 @@ Slack settings (``backend.settings``). ``POST /round/run`` runs one design-crew 
 (``backend.round_job``) with these same Slack and GitHub sources plus the owner's sessions; ``GET /round/status``
 reports it and, when it ends, writes a ``manual_round`` run row. ``GET /schedule`` also
 answers ``next_round_at`` and ``round_stats`` (the last-3 average). ``/schedule`` and ``/schedule/tick``: the owner's opt-in weekly round and daily
-regress (``backend.schedule``), off by default. ``GET /outcomes`` reads the outcome ledger
-and the scoring job; ``POST /outcomes/link`` links a card to a KiroCrew PR; ``POST /score/run``
+regress (``backend.schedule``), off by default. ``GET /outcomes`` reads the outcome ledger,
+the scoring job and each linked PR's check rollup (``backend.outcome_checks``, cached); ``POST /outcomes/link`` links a card to a KiroCrew PR; ``POST /score/run``
 starts ``python -m backend.autoscore`` (single-flight; the tick does when scoring is on).
 ``GET /prompt-changes`` lists the proposer's prompt-change cards; ``POST /prompt-changes/decide``
 records the owner's choice, and 做 applies the change (``backend.prompt_changes``).
@@ -38,7 +38,7 @@ except ImportError:  # tests and the CLI import ``backend`` as a top-level packa
     import adapters.sessions
     import adapters.slack
 
-from . import dispatch, ledger, prompt_changes, round_job, schedule, settings, store, team
+from . import dispatch, ledger, outcome_checks, prompt_changes, round_job, schedule, settings, store, team
 from .ledger import seal
 
 APP_NAME = "harness-rsi"
@@ -226,7 +226,8 @@ def start_score(kc):
 async def _outcomes(request, ctx):
     score = {k: v for k, v in SCORE.items() if k != "task"}
     outcomes, sent, seen = await asyncio.to_thread(lambda: (ledger.rows(), dispatch.rows(), ledger.integrity()))
-    return web.json_response({"ok": True, "outcomes": outcomes, "score": score, "dispatches": sent, **seen})
+    ci = await asyncio.to_thread(outcome_checks.read, outcomes)
+    return web.json_response({"ok": True, "outcomes": outcomes, "score": score, "dispatches": sent, "ci": ci, **seen})
 
 
 async def _link(request, ctx):

@@ -1,6 +1,7 @@
-"""Every test gets a fixed seal key in place of the gateway vault (there is none in CI)."""
+"""Every test gets a fixed seal key in place of the gateway vault (there is none in CI), and no test calls real ``gh``."""
 
 import hashlib
+import subprocess
 import sys
 from pathlib import Path
 
@@ -10,6 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from backend import outcome_checks  # noqa: E402
 from judge import seal  # noqa: E402
 
 TEST_KEYS = {"enc": hashlib.sha256(b"test enc").digest(), "mac": hashlib.sha256(b"test mac").digest()}
@@ -34,3 +36,9 @@ def seal_keys(monkeypatch):
     seal._CACHE.clear()
     yield vault
     seal._CACHE.clear()
+
+
+@pytest.fixture(autouse=True)
+def no_gh_checks(monkeypatch):
+    """``GET /outcomes`` reads PR checks through ``gh``; a test that wants them passes its own runner."""
+    monkeypatch.setattr(outcome_checks, "RUN", lambda argv, **kw: subprocess.CompletedProcess(argv, 1, "", "gh is off in tests"))

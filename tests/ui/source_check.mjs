@@ -90,7 +90,7 @@ const ended = { ...roundJob, running: false, finished_at: 2, counts: { signals: 
 assert.match(ui.roundText(ended), /^Round 5: 4 proposals from 12 signals at .* · slack: off$/)
 assert.match(ui.roundText({ ...ended, error: 'only 2 proposals' }), /failed at .*\(only 2 proposals\)$/)
 
-// Schedule: the source reads and saves it; the form starts off and edits each field; the board lists runs.
+// Schedule: the source reads and saves it; the form starts off and edits each field; Runs lists the runs.
 const sched = { schedule: { round_enabled: false, regress_enabled: false, weekday: 0, hour: 9, kirocrew_dir: '' }, runs: [] }
 const sapi = { get: async (p) => { assert.equal(p, '/api/apps/harness-rsi/schedule'); return sched },
   post: async (p, b) => { assert.equal(p, '/api/apps/harness-rsi/schedule'); return { ok: true, schedule: b } } }
@@ -119,28 +119,7 @@ const runRows = find(expand(ui.Runs({ runs })), (x) => x.props['data-testid'] ==
 assert.deepEqual(runRows.map((r) => text(r.children[0])), ['Daily regression', 'Weekly round', 'Manual round'])
 assert.deepEqual(runRows.map((r) => text(r.children[3])), ['2 regression(s) at f00dfee', '3 cards from 12 signals', '3 cards from 4 signals'])
 assert.equal(ui.runResult({ kind: 'round', error: 'only 2 proposals' }), 'Failed: only 2 proposals')
-
-const calls = []
-const tree = expand(ui.Board({ proposals, onDecide: (id, d) => calls.push([id, d]) }))
-const cards = find(tree, (n) => n.props['data-testid'] === 'proposal-card')
-assert.equal(cards.length, proposals.length)
-for (const p of proposals) {
-  const card = cards.find((c) => c.props['data-id'] === p.id)
-  const t = text(card)
-  const want = [p.pain, `${p.heat.people} people / ${p.heat.window_days} days`, `${p.cost.files} files · ${p.cost.lines} lines`,
-    ...p.exam_ids, ...p.cost.risks, p.mock_artifact_slug ? `Open mock: ${p.mock_artifact_slug}` : 'No mock yet']
-  for (const w of want) assert.ok(t.includes(w), `${p.id}: ${w}`)
-  assert.equal(text(find([card], (n) => n.props.id === card.props['aria-labelledby'])[0]), p.pain)
-  const buttons = find([card], (n) => n.type === 'button')
-  assert.deepEqual(buttons.map(text), ['Do', 'Skip', 'Later'])
-  for (const b of buttons) {
-    assert.equal(b.props.type, 'button')
-    assert.equal(b.props['aria-pressed'], p.decision === b.props['data-decision'])
-    b.props.onClick()
-  }
-}
-assert.deepEqual(calls, ui.byHeat(proposals).flatMap((p) => ['do', 'skip', 'later'].map((d) => [p.id, d])))
-
+// A decision shows on its card at once, before the reload.
 for (const d of ['do', 'skip', 'later']) {
   const next = ui.applyDecision(proposals, 'prop_bg_tasks', d)
   assert.deepEqual(next, proposals.map((p) => (p.id === 'prop_bg_tasks' ? { ...p, decision: d } : p)))
@@ -154,7 +133,7 @@ const primary = order.filter((s) => !s.dedup_of)
 assert.deepEqual(order.slice(0, primary.length), primary)
 const people = primary.map((s) => s.mentions.people)
 assert.deepEqual(people, [...people].sort((a, b) => b - a))
-// Outcomes: the source reads, links and scores; a card shows each linked PR's judge line and regress line.
+// Outcomes: the source reads, links and scores; the judge line and regress line of a linked PR.
 const outcomes = JSON.parse(fs.readFileSync('fixtures/outcomes.json', 'utf8'))
 const osent = []
 const oapi = { get: async (p) => { assert.equal(p, '/api/apps/harness-rsi/outcomes'); return { outcomes, score: null } },
@@ -172,37 +151,16 @@ assert.equal(ui.regressLine(outcomes[0]), 'Regress @ 3333333: 1/1 pass')
 assert.equal(ui.regressLine({ ...outcomes[0], regress: [{ ...outcomes[0].regress[0], exams: { a: 'fail' }, regressions: 1 }] }),
   'Regress @ 3333333: 0/1 pass · 1 regression(s)')
 assert.equal(ui.regressLine(outcomes[1]), '')
-const linked = []
-const scored = expand(ui.Board({ proposals, outcomes, onDecide() {}, onLink: (id, n) => linked.push([id, n]) }))
-const bg = find(scored, (n) => n.props['data-id'] === 'prop_bg_tasks')[0]
-assert.equal(text(find([bg], (n) => n.props['data-testid'] === 'score')[0]), 'Judge: base fail 0/1 → head pass 1/1')
-assert.equal(find([bg], (n) => n.type === 'a' && n.props.href.includes('/pull/'))[0].props.href, 'https://github.com/example-org/example-repo/pull/101')
-const linkForm = find([bg], (n) => n.type === 'form')[0]
-linkForm.props.onSubmit({ preventDefault() {}, target: { elements: { pr: { value: '15792' } } } })
-linkForm.props.onSubmit({ preventDefault() {}, target: { elements: { pr: { value: '' } } } })  // blank: nothing linked
-assert.deepEqual(linked, [['prop_bg_tasks', 15792]])
-assert.ok(text(find(scored, (n) => n.props['data-id'] === 'prop_plain_errors')[0]).includes('No PR linked'))
 assert.equal(ui.scoreJobText(null), '')
 assert.match(ui.scoreJobText({ running: true, started_at: 1 }), /^Scoring PRs since /)
 assert.match(ui.scoreJobText({ running: false, started_at: 1, finished_at: 2, updated: [{}], error: '' }), /: 1 PR\(s\) changed$/)
-// Prompt change: the card shows A vs B per metric and the diff; Do sends the decision; an applied card has no buttons.
+// Prompt change: the source reads the changes and posts a decision.
 const { promptChange: pc } = await import('./ui/fake-data.mjs')
 const papi = { get: async (p) => { assert.equal(p, '/api/apps/harness-rsi/prompt-changes'); return { changes: [pc] } },
   post: async (p, b) => { assert.equal(p, '/api/apps/harness-rsi/prompt-changes/decide'); return { change: { ...pc, status: 'applied', b } } } }
 assert.deepEqual(await ui.backendSource(papi).promptChanges(), [pc])
 assert.deepEqual((await ui.backendSource(papi).decidePrompt(pc.id, 'do')).b, { id: pc.id, decision: 'do' })
-const picked = []
-const pcard = expand(ui.PromptChangeCard({ change: pc, onDecide: (id, d) => picked.push([id, d]) }))
-const ptext = text(pcard[0])
-for (const w of ['Prompt change', pc.summary, 'vaaaaaaaaaa → v0123456789', 'setter_hit_rate', '0.1', '0.3', 'better', '+7. Another new rule.']) {
-  assert.ok(ptext.includes(w), w)
-}
-find(pcard, (n) => n.type === 'button').forEach((b) => b.props.onClick())
-assert.deepEqual(picked, [[pc.id, 'do'], [pc.id, 'skip'], [pc.id, 'later']])
-const done = expand(ui.PromptChangeCard({ change: { ...pc, status: 'applied', ab: null }, onDecide() {} }))
-assert.equal(find(done, (n) => n.type === 'button').length, 0)
-assert.ok(text(done[0]).includes('Applied: rsi-question-setter now runs v0123456789') && text(done[0]).includes('No A/B run yet'))
-// Auto-dispatch: the source reads and saves it; the form starts off; a card shows its worker chat or why it failed.
+// Auto-dispatch: the source reads and saves it; the form starts off.
 const dconf = { auto_dispatch: false, repos: ['kirodotdev/KiroCrew'], daily_cap: 2, trust_dispatched: false }
 const dapi = { get: async (p) => { assert.equal(p, '/api/apps/harness-rsi/dispatch'); return { dispatch: dconf } },
   post: async (p, b) => { assert.equal(p, '/api/apps/harness-rsi/dispatch'); return { dispatch: b } } }
@@ -221,51 +179,13 @@ tbox.props.onChange(true)
 assert.ok(text(find(dform, (n) => n.props?.['data-testid'] === 'trust-risk')[0]).startsWith('Risk: a trusted chat runs tools without asking you'))
 find(dform, (n) => n.type === 'button')[0].props.onClick()
 assert.deepEqual(dedits, [{ ...dconf, auto_dispatch: true }, { ...dconf, repos: ['a/b', 'c/d'] }, { ...dconf, daily_cap: 3 }, { ...dconf, trust_dispatched: true }, 'save'])
-const sentRow = { card_id: 'prop_bg_tasks', state: 'dispatched', session: 'rsi-bg-tasks-1', error: '' }
-const dcard = expand(ui.ProposalCard({ proposal: proposals[0], onDecide() {}, dispatch: sentRow }))
-assert.equal(find(dcard, (n) => n.type === 'a' && n.props.href === '/chat?slot=rsi-bg-tasks-1').length, 1)
-const failedLine = expand(ui.DispatchLine({ row: { ...sentRow, state: 'error', session: null, error: 'daily cap of 2 reached' } }))
-assert.equal(failedLine[0].props.role, 'alert')
-assert.equal(text(failedLine[0]), 'Dispatch failed: daily cap of 2 reached')
-assert.equal(ui.DispatchLine({ row: undefined }), null)
-// Manual dispatch: the source posts the ids; only a Do card with no live chat gets a check box and a Dispatch button.
+// Manual dispatch: the source posts the ids; only a Do card with no live chat (or a failed one) may be dispatched.
 const mposts = []
 const mapi = { post: async (p, b) => { mposts.push([p, b]); return { results: [], dispatches: [] } } }
 await ui.backendSource(mapi).dispatchCards(['prop_plain_errors'])
 assert.deepEqual(mposts, [['/api/apps/harness-rsi/dispatch/start', { proposal_ids: ['prop_plain_errors'] }]])
-const doIds = proposals.filter((p) => p.decision === 'do').map((p) => p.id)
-assert.ok(doIds.length >= 1 && doIds.length < proposals.length, 'the fixtures hold Do and other cards')
-const fired = [], picks = []
-const mtree = (props) => expand(ui.Board({ proposals, onDecide() {}, onDispatch: (ids) => fired.push(ids), onSelect: (id, on) => picks.push([id, on]), ...props }))
-const mt = mtree({})
-const btnCards = find(mt, (n) => n.props['data-testid'] === 'proposal-card' && find([n], (x) => x.props['data-testid'] === 'dispatch-btn').length)
-assert.deepEqual(btnCards.map((c) => c.props['data-id']).sort(), [...doIds].sort())
-for (const c of btnCards) {
-  assert.deepEqual(find([c], (n) => n.type === 'button').map(text), ['Do', 'Skip', 'Later', 'Dispatch'])
-  const box = find([c], (n) => n.props['data-testid'] === 'dispatch-pick')[0]
-  assert.equal(box.props.type, 'checkbox')
-  assert.match(box.props['aria-label'], /^Select for dispatch: /)
-  box.props.onChange({ target: { checked: true } })
-  find([c], (n) => n.props['data-testid'] === 'dispatch-btn')[0].props.onClick()
-}
-const bySel = (tree) => find(tree, (n) => n.props['data-testid'] === 'dispatch-selected')[0]
-const byAll = (tree) => find(tree, (n) => n.props['data-testid'] === 'dispatch-all')[0]
-assert.equal(text(bySel(mt)), 'Dispatch selected (0)')
-assert.equal(bySel(mt).props.disabled, true)
-assert.equal(text(byAll(mt)), 'Dispatch all Do')
-byAll(mt).props.onClick()
-const withSel = mtree({ selected: [doIds[0], 'prop_one_step_undo'] })  // a non-Do id never rides along
-assert.equal(text(bySel(withSel)), 'Dispatch selected (1)')
-bySel(withSel).props.onClick()
-assert.deepEqual(picks, doIds.map((id) => [id, true]))
-assert.deepEqual(fired, [...doIds.map((id) => [id]), ui.byHeat(proposals).filter((p) => p.decision === 'do').map((p) => p.id), [doIds[0]]])
-// A live row hides the button; an error row offers it again; no onDispatch, no bar.
-const live = mtree({ dispatches: [{ card_id: doIds[0], state: 'dispatched', session: 's1', error: '' }] })
-assert.equal(find(live, (n) => n.props['data-testid'] === 'dispatch-btn').length, doIds.length - 1)
-assert.equal(byAll(live).props.disabled, doIds.length === 1)
 assert.ok(ui.dispatchable({ decision: 'do' }, { state: 'error' }) && !ui.dispatchable({ decision: 'do' }, { state: 'pending' }) && !ui.dispatchable({ decision: 'later' }))
-assert.equal(find(expand(ui.Board({ proposals, onDecide() {} })), (n) => n.props['data-testid'] === 'dispatch-bar').length, 0)
-// Each result reads plainly on its card; started and already link the worker chat.
+// Each result reads plainly; started and already link the worker chat.
 const res = (r) => expand(ui.DispatchResult({ result: { id: 'x', ...r } }))[0]
 assert.equal(text(res({ result: 'started', session: 'rsi-a' })), 'Started. Worker chat: rsi-a')
 assert.equal(find([res({ result: 'started', session: 'rsi a' })], (n) => n.type === 'a')[0].props.href, '/chat?slot=rsi%20a')
@@ -275,7 +195,5 @@ assert.equal(text(res({ result: 'over_cap' })), 'Waiting for tomorrow: the daily
 assert.equal(text(res({ result: 'not_do' })), 'Not started: decide Do first.')
 assert.equal(res({ result: 'error', reason: 'boom' }).props.role, 'alert')
 assert.equal(text(res({ result: 'error', reason: 'boom' })), 'Not started: boom')
-const shownRes = expand(ui.ProposalCard({ proposal: proposals[0], onDecide() {}, dispatch: { state: 'error', error: 'old' }, result: { id: 'x', result: 'over_cap' } }))
-assert.equal(find(shownRes, (n) => n.props['data-testid'] === 'dispatch-line').length, 0, 'the click result replaces the stored line')
 assert.equal(ui.DispatchResult({ result: undefined }), null)
-console.log('board ok')
+console.log('source ok')

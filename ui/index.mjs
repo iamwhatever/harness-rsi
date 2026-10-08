@@ -1,4 +1,4 @@
-// Harness RSI priority board. Hand-written ESM, no build step: the host's import
+// Harness RSI page. Hand-written ESM, no build step: the host's import
 // map resolves `react`, `lucide-react` and `@kirocrew/app-sdk(/ui)`, as it does for a built bundle.
 // Host components only, laid out like Dev Fleet / Issue Radar; every word on screen comes from strings.mjs.
 import { createElement as h, useCallback, useEffect, useMemo, useState } from 'react'
@@ -11,8 +11,9 @@ import { demoSource, isDemo } from './fake-data.mjs'
 import { HarnessRsiV2, isUxV2 } from './v2.mjs'
 import { Home } from './home.mjs'
 import { Needs } from './needs.mjs'
+import { Work } from './work.mjs'
 
-const { History, Inbox, Radio, Users, Wand2 } = Lucide
+const { History, Radio, Users } = Lucide
 const BASE = '/api/apps/harness-rsi'
 
 /** The data source over the app backend. `load` answers { proposals, signals, images }
@@ -61,7 +62,6 @@ export const slackNote = (s) => (s?.command_set ? t('slackOn', { n: s.channels.l
 
 const LABEL = 'text-[11px] uppercase tracking-wide text-muted font-semibold mb-1'
 const MUTED = 'text-[13px] text-muted'
-const Section = ({ title, children }) => h('div', { className: 'min-w-0' }, h('div', { className: LABEL }, title), children)
 const Saver = ({ onSave, note, label }) => h('div', { className: 'flex flex-wrap items-center gap-3 mt-2' },
   h(UI.Btn, { type: 'button', primary: true, onClick: onSave }, label || t('save')), h('span', { className: MUTED, 'aria-live': 'polite' }, note))
 const Table = ({ caption, cols, children, testId }) => h('div', { className: 'overflow-x-auto' },
@@ -108,14 +108,6 @@ export function DispatchForm({ conf, onChange, onSave, note }) {
     h(Saver, { onSave, note }))
 }
 
-/** A card's worker-chat line: opening, a link to the chat, or why the dispatch failed. */
-export function DispatchLine({ row: d }) {
-  if (!d) return null
-  if (d.state === 'error') return h('div', { role: 'alert', 'data-testid': 'dispatch-line', className: 'text-[13px] text-danger mt-2' }, t('dispFailed', { e: d.error }))
-  return h('div', { 'data-testid': 'dispatch-line', className: `${MUTED} mt-2` }, d.state === 'pending' ? t('dispOpening')
-    : h('a', { href: `/chat?slot=${encodeURIComponent(d.session)}`, className: 'text-accent hover:underline' }, t('dispChat', { s: d.session })))
-}
-
 /** A card may be dispatched by hand: decided Do, and no chat is opening or open for it. */
 export const dispatchable = (p, row) => p.decision === 'do' && (!row || row.state === 'error')
 const chatLink = (s) => h('a', { href: `/chat?slot=${encodeURIComponent(s)}`, className: 'text-accent hover:underline' }, t('dispChat', { s }))
@@ -129,13 +121,6 @@ export function DispatchResult({ result: r }) {
   return h('div', { 'data-testid': 'dispatch-result', 'data-result': r.result, role: bad ? 'alert' : undefined,
     className: bad ? 'text-[13px] text-danger mt-2' : `${MUTED} mt-2` }, ...body)
 }
-/** The Dispatch button and the board's check box, for a card that may be dispatched by hand. */
-const DispatchPick = ({ p, selected, onSelect, onDispatch }) => h('div', { className: 'flex flex-wrap items-center gap-3 mt-2' },
-  h('label', { className: `${MUTED} flex items-center gap-1.5` },
-    h('input', { type: 'checkbox', 'data-testid': 'dispatch-pick', checked: !!selected, 'aria-label': t('dispPick', { pain: p.pain }),
-      onChange: (e) => onSelect?.(p.id, !!e?.target?.checked) }), t('dispSelect')),
-  h(UI.Btn, { type: 'button', 'data-testid': 'dispatch-btn', onClick: () => onDispatch([p.id]) }, t('dispBtn')))
-
 const at = (s) => (s ? new Date(s).toLocaleString(getLang(), { dateStyle: 'short', timeStyle: 'short', hourCycle: 'h23' }) : '')
 /** One line of result for a run record. */
 export const runResult = (r) => (r.error ? t('runFailed', { e: r.error }) : r.kind === 'round' || r.kind === 'manual_round' ? t('runCards', { cards: r.cards, signals: r.signals })
@@ -149,7 +134,6 @@ export function Runs({ runs }) {
       [t(JOB[r.kind] || 'jobRegress'), at(r.start), at(r.end), runResult(r)].map((c, i) => h('td', { key: i, className: TD }, c)))))
 }
 
-export const DECISIONS = ['do', 'skip', 'later']
 /** Most people first, then the shortest window. */
 export const byHeat = (list) =>
   [...list].sort((a, b) => b.heat.people - a.heat.people || a.heat.window_days - b.heat.window_days)
@@ -173,90 +157,9 @@ export const regressLine = (o) => {
   const got = Object.values(g.exams)
   return t(g.regressions ? 'regressLineBad' : 'regressLine', { sha: g.sha.slice(0, 7), pass: got.filter((x) => x === 'pass').length, n: got.length, bad: g.regressions })
 }
-/** A card's product PRs with their scores; with `onLink` a PR number can be linked. */
-export function Outcomes({ proposal: p, outcomes, onLink }) {
-  const submit = (e) => { e.preventDefault(); const n = Number(e.target.elements.pr.value); if (n > 0) onLink(p.id, n) }
-  return h(Section, { title: t('secPr') }, outcomes.map((o) => h('div', { key: o.pr, 'data-testid': 'outcome', className: 'flex flex-wrap items-center gap-2 mt-1' },
-    h('a', { href: prUrl(o.pr), target: '_blank', rel: 'noreferrer', className: 'text-accent hover:underline' }, o.pr.split('/').pop()),
-    h(UI.Badge, { variant: o.state === 'merged' ? 'ok' : 'muted' }, word('state', o.state)),
-    h('span', { 'data-testid': 'score' }, scoreText(o)), h('span', { className: MUTED }, regressLine(o)))),
-  !outcomes.length ? h('div', { className: MUTED }, t('noPr')) : null,
-  onLink ? h('form', { onSubmit: submit, className: 'flex flex-wrap items-center gap-2 mt-2' },
-    h(UI.Input, { name: 'pr', type: 'number', min: 1, placeholder: t('prPlaceholder'), 'aria-label': t('prAria', { pain: p.pain }), className: 'w-32' }),
-    h(UI.Btn, { type: 'submit' }, t('linkPr'))) : null)
-}
-
-const PRIOR = 'prior_art: '
-const Frame = ({ title, children }) => h('figure', { className: 'min-w-0 m-0' }, h('figcaption', { className: LABEL }, title),
-  h('div', { className: 'h-36 rounded-md border border-border bg-bg-elevated flex items-center justify-center overflow-hidden' }, children))
-const Decide = ({ value, label, onDecide }) => h('div', { role: 'group', 'aria-label': label, className: 'flex flex-wrap items-center gap-2 mt-3' },
-  DECISIONS.map((d) => h(UI.Btn, { key: d, type: 'button', 'data-decision': d, primary: value === d, 'aria-pressed': value === d, onClick: () => onDecide(d) }, t(`dec_${d}`))),
-  h('span', { className: MUTED, 'aria-live': 'polite' }, value ? t('decided', { d: t(`dec_${value}`) }) : t('undecided')))
-
-/** One proposal: title, heat, sources, before/after, cost, prior art, exams, score, decision. */
-export function ProposalCard({ proposal: p, before, onDecide, outcomes, onLink, dispatch, signals = [], onDispatch, result, selected, onSelect }) {
-  const titleId = `pain-${p.id}`
-  const slug = p.mock_artifact_slug
-  const srcs = signals.filter((s) => p.signal_ids.includes(s.id))
-  const prior = p.cost.risks.filter((r) => r.startsWith(PRIOR)).map((r) => r.slice(PRIOR.length))
-  const risks = p.cost.risks.filter((r) => !r.startsWith(PRIOR))
-  return h(UI.Card, { role: 'region', 'aria-labelledby': titleId, 'data-testid': 'proposal-card', 'data-id': p.id },
-    h('div', { className: 'flex flex-wrap items-center justify-between gap-2' },
-      h('h3', { id: titleId, className: 'm-0 text-[15px] font-semibold text-text-strong min-w-0' }, p.pain),
-      h(UI.Badge, { variant: 'warn', 'data-testid': 'heat' }, t('heat', { people: p.heat.people, days: p.heat.window_days }))),
-    h('div', { className: 'flex flex-wrap items-center gap-2 mt-2', 'data-testid': 'sources' },
-      srcs.length ? srcs.map((s) => h('a', { key: s.id, href: s.links[0], target: '_blank', rel: 'noreferrer', className: 'text-accent hover:underline text-[12px] font-mono' }, s.source))
-        : h('span', { className: MUTED }, t('noSources'))),
-    h('div', { className: 'grid gap-3 sm:grid-cols-2 mt-3' },
-      h(Frame, { title: t('before') }, before ? h('img', { src: before, alt: t('beforeAlt', { pain: p.pain }), className: 'w-full h-full object-cover' })
-        : h('span', { className: MUTED }, t('noShot'))),
-      h(Frame, { title: t('after') }, slug ? h('a', { href: `/artifacts/${slug}`, className: 'text-accent hover:underline text-[13px]' }, t('openMock', { slug }))
-        : h('span', { className: MUTED }, t('noMock')))),
-    h('div', { className: 'grid gap-3 sm:grid-cols-2 mt-3' },
-      h(Section, { title: t('secCost') }, h('div', { 'data-testid': 'cost' }, t('cost', { files: p.cost.files, lines: p.cost.lines })),
-        h('div', { className: MUTED }, risks.length ? t('risks', { r: risks.join(', ') }) : t('noRisks'))),
-      h(Section, { title: t('secPrior') }, h('div', { className: MUTED, 'data-testid': 'prior-art' }, prior.length ? prior.join(' · ') : t('noPrior'))),
-      h(Section, { title: t('secExams') }, h('div', { className: 'flex flex-wrap gap-1.5' }, p.exam_ids.map((e) => h(UI.Badge, { key: e, variant: 'muted' }, e)))),
-      outcomes || onLink ? h(Outcomes, { proposal: p, outcomes: outcomes || [], onLink }) : null),
-    h(Decide, { value: p.decision, label: t('decAria', { pain: p.pain }), onDecide: (d) => onDecide(p.id, d) }),
-    onDispatch && dispatchable(p, dispatch) ? h(DispatchPick, { p, selected, onSelect, onDispatch }) : null,
-    result ? h(DispatchResult, { result }) : h(DispatchLine, { row: dispatch }))
-}
-
-const VERDICT = { better: 'ok', worse: 'err', same: 'muted' }
-/** One proposed crew-prompt change: its A/B numbers and diff. Do applies it (a new prompt version). */
-export function PromptChangeCard({ change: c, onDecide }) {
-  const titleId = `pc-${c.id}`
-  const num = (x) => (x == null ? '—' : String(x))
-  return h(UI.Card, { role: 'region', 'aria-labelledby': titleId, 'data-testid': 'prompt-change-card', 'data-id': c.id },
-    h('div', { className: LABEL }, t('pcLabel')),
-    h('h3', { id: titleId, className: 'm-0 text-[15px] font-semibold text-text-strong' }, `${c.agent}: ${c.summary}`),
-    h('div', { className: `${MUTED} mt-1` }, `${c.from} → ${c.to}`),
-    c.ab ? h('div', { className: 'mt-3' }, h(Table, { testId: 'prompt-ab', caption: t('abCaption', { rounds: c.ab.rounds.join(', '), reps: c.ab.reps }),
-      cols: [t('colMetric'), t('colA'), t('colB'), t('colVerdict')] }, Object.entries(c.ab.metrics).map(([m, v]) => h('tr', { key: m },
-      td(h('code', null, m)), td(num(v.A)), td(num(v.B)), td(h(UI.Badge, { variant: VERDICT[v.verdict] || 'muted' }, word('verdict', v.verdict)))))))
-      : h('div', { className: `${MUTED} mt-3` }, t('noAb')),
-    h('details', { className: 'mt-3' }, h('summary', { className: MUTED }, t('showDiff')),
-      h('pre', { className: 'text-[12px] whitespace-pre-wrap overflow-x-auto' }, c.diff)),
-    c.status === 'applied' ? h('div', { className: `${MUTED} mt-3` }, t('pcApplied', { agent: c.agent, to: c.to }))
-      : h(Decide, { value: c.status === 'pending' ? null : c.status, label: t('pcAria', { id: c.id }), onDecide: (d) => onDecide(c.id, d) }))
-}
 
 const empty = (icon, key) => h(UI.EmptyState, { icon: h(icon, { size: 28 }), title: t(key), subtitle: t('emptyHint') })
 const stack = (...c) => h('div', { className: 'flex flex-col gap-3' }, ...c)
-export function Board({ proposals, images = {}, onDecide, outcomes, onLink, dispatches = [], signals = [], onDispatch, results = {}, selected = [], onSelect }) {
-  if (!proposals.length) return empty(Inbox, 'noProposals')
-  const row = (p) => dispatches.find((d) => d.card_id === p.id)
-  const ready = byHeat(proposals).filter((p) => dispatchable(p, row(p))).map((p) => p.id)
-  const picked = selected.filter((id) => ready.includes(id))
-  const bar = onDispatch ? h('div', { key: 'dispatch-bar', className: 'flex flex-wrap items-center gap-2', 'data-testid': 'dispatch-bar' },
-    h(UI.Btn, { type: 'button', primary: true, disabled: !picked.length, 'data-testid': 'dispatch-selected', onClick: () => onDispatch(picked) }, t('dispSelected', { n: picked.length })),
-    h(UI.Btn, { type: 'button', disabled: !ready.length, 'data-testid': 'dispatch-all', onClick: () => onDispatch(ready) }, t('dispAllDo'))) : null
-  return stack(bar, byHeat(proposals).map((p) => h(ProposalCard, { key: p.id, proposal: p, before: images[p.id]?.before, onDecide, signals,
-    outcomes: outcomes && outcomes.filter((o) => o.card_id === p.id), onLink, dispatch: row(p),
-    onDispatch, result: results[p.id], selected: selected.includes(p.id), onSelect })))
-}
-
 export function Signals({ signals }) {
   if (!signals.length) return empty(Radio, 'noSignals')
   const cols = ['colPain', 'colPeople', 'colMentions', 'colDays', 'colSource', 'colLayer'].map((k) => t(k))
@@ -325,8 +228,9 @@ export function Team({ team }) {
       team.loose_lanes.map((r) => h(Reporter, { key: r.key, rec: r, staleMinutes: m }))) : null)
 }
 
-/** Home first (docs/design/ux-v2.md); the other tabs stay until the v2 Needs-you and Work tabs replace them. */
-export const TABS = ['home', 'needs', 'board', 'signals', 'rounds', 'prompts', 'team', 'settings']
+/** docs/design/ux-v2.md: Home, Needs you, Work, Settings. Signals, Rounds, Team and the raw A/B fold into Home's Details;
+ *  cards to pick or start and prompt changes are in Needs you, and picked cards with their PRs are in Work. */
+export const TABS = ['home', 'needs', 'work', 'settings']
 const why = (e) => String(e?.message || e)
 const clock = (s) => new Date(s * 1000).toLocaleTimeString(getLang(), { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
 /** One line for the GitHub job (it runs for minutes after a refresh). */
@@ -386,7 +290,6 @@ export function HarnessRsi({ src, demo = false }) {
   useEffect(() => { readSched() }, [readSched])
   const [[disp, dispNote], setDisp] = useState([null, ''])
   const [results, setResults] = useState({})
-  const [selected, setSelected] = useState([])
   useEffect(() => { src.dispatchConf().then((v) => setDisp([v, '']), () => {}) }, [src])
   const failed = (key) => (e) => setNote(t(key, { e: why(e) })), notSaved = (e) => t('notSaved', { e: why(e) })
   const save = () => src.saveSettings(form).then((v) => setForm([toForm(v), t('saved')]), (e) => setForm([form, notSaved(e)]))
@@ -401,13 +304,11 @@ export function HarnessRsi({ src, demo = false }) {
     Promise.resolve(src.decide(id, decision)).then(() => { setNote(idle ? t('savedNotStarted') : t('savedDecision', { d: t(`dec_${decision}`) })); reload(); src.outcomes().then(setOut, () => {}) },
       (e) => { failed('decideFailed')(e); reload() })
   }
-  const select = (id, on) => setSelected((xs) => (on ? [...new Set([...xs, id])] : xs.filter((x) => x !== id)))
   const dispatchCards = (ids) => {
     if (!ids.length) return
     setNote(t('dispatching', { n: ids.length }))
     src.dispatchCards(ids).then((r) => {
       setResults((old) => ({ ...old, ...Object.fromEntries(r.results.map((x) => [x.id, x])) }))
-      setSelected((xs) => xs.filter((x) => !ids.includes(x)))
       setNote(t('dispatched', { n: r.results.filter((x) => x.result === 'started').length, total: r.results.length }))
       src.outcomes().then(setOut, () => {})
       src.dispatchConf().then((v) => setDisp(([old, n]) => [{ ...(old || v), used_today: v.used_today }, n]), () => {})
@@ -415,7 +316,6 @@ export function HarnessRsi({ src, demo = false }) {
   }
   const decidePrompt = (id, decision) => src.decidePrompt(id, decision)
     .then(() => { setNote(t(decision === 'do' ? 'pcDone' : 'saved')); src.promptChanges().then(setChanges, () => {}) }, failed('pcFailed'))
-  const linkPr = (id, n) => src.link(id, n).then(() => src.outcomes().then(setOut), failed('linkFailed'))
   const score = () => src.score().then(setOut, failed('scoreStartFailed'))
   const runRound = () => { setArmed(false); src.runRound().then(setRound, failed('roundStartFailed')) }
   const refresh = () => {
@@ -424,33 +324,19 @@ export function HarnessRsi({ src, demo = false }) {
       failed('refreshFailed'))
   }
 
-  const toolbar = (...c) => h('div', { className: 'flex flex-wrap items-center gap-2 mb-3' }, ...c)
   const lines = (...xs) => xs.filter(Boolean).map((x, i) => h('div', { key: i, className: MUTED }, x))
   const pending = (data?.proposals || []).filter((p) => !p.decision).length
   const panels = {
     home: () => [h(Home, { key: 'home', round, sched, settings: form?.saved, job, disp, signals: data.signals, changes: changes || [], readAt,
-      go: setTab, armed, setArmed, runRound })],
+      go: setTab, armed, setArmed, runRound, refresh, regress, team, scoreLine: scoreJobText(out?.score) })],
     needs: () => [h(Needs, { key: 'needs', proposals: data.proposals, signals: data.signals, out, disp, changes, team, sched, readAt, results, onDecide: decide, onDispatch: dispatchCards, onPrompt: decidePrompt })],
-    board: () => [toolbar(h(UI.Btn, { type: 'button', onClick: score, disabled: scoreRunning(out) }, t('scorePrs')), h('span', { className: MUTED, 'data-testid': 'score-job' }, scoreJobText(out?.score))),
-      h(Board, { proposals: data.proposals, images: data.images, signals: data.signals, onDecide: decide, outcomes: out?.outcomes, onLink: linkPr, dispatches: out?.dispatches,
-        onDispatch: dispatchCards, results, selected, onSelect: select })],
-    signals: () => [toolbar(h(UI.Btn, { type: 'button', onClick: refresh }, t('refresh')), h('span', { className: MUTED, 'data-testid': 'github-job' }, jobText(job))),
-      form && !form.saved.command_set ? h('div', { key: 's', className: `${MUTED} mb-3`, 'data-testid': 'slack-off' }, slackNote(null)) : null,
-      h(Signals, { signals: data.signals })],
-    rounds: () => [toolbar(h(RunRound, { armed, running: isRunning(round), onArm: () => setArmed(true), onConfirm: runRound, onCancel: () => setArmed(false) })),
-      h(UI.Card, { key: 'jobs' }, h('div', { className: LABEL }, t('jobsTitle')),
-        h('div', { 'data-testid': 'round-job' }, lines(roundText(round) || t('roundNever'))), h('div', { 'data-testid': 'regress' }, lines(regressText(regress))),
-        lines(jobText(job), scoreJobText(out?.score))),
-      h(UI.Card, { key: 'runs' }, h(Runs, { runs: sched?.runs || [] }))],
-    team: () => [h(Team, { key: 't', team })],
-    prompts: () => [(changes || []).length ? changes.map((c) => h(PromptChangeCard, { key: c.id, change: c, onDecide: decidePrompt })) : empty(Wand2, 'noPromptChanges')],
+    work: () => [h(Work, { key: 'w', proposals: data.proposals, out, team, onScore: score, scoreBusy: scoreRunning(out), scoreLine: scoreJobText(out?.score) })],
     settings: () => [form ? h(SettingsForm, { key: 'f', form, note: formNote, onSave: save, onChange: (f) => setForm([f, '']) }) : lines(formNote),
       sched ? h(ScheduleForm, { key: 's', conf: sched.schedule, note: schedNote, onSave: saveSched, onChange: (c) => setSched([{ ...sched, schedule: c }, '']) }) : null,
       disp ? h(DispatchForm, { key: 'd', conf: disp, note: dispNote, onSave: saveDisp, onChange: (c) => setDisp([c, '']) }) : null],
   }
   const body = error ? h(UI.ErrorNotice, { title: t('loadFailed'), message: error, testId: 'load-error' })
     : !data ? h(UI.ContentSkeleton, { rows: 4 }) : stack(...panels[tab]())
-  const counts = { board: data?.proposals.length, signals: data?.signals.length, prompts: changes?.length }
   return h('div', { className: 'flex-1 min-w-0 flex flex-col min-h-0', lang: getLang() },
     h(UI.PageHeader, { title: t('title'), subtitle: t('subtitle') }),
     h('div', { className: 'flex-1 overflow-y-auto px-4 md:px-6 pb-8 min-h-0' }, h('div', { className: 'max-w-4xl flex flex-col gap-3' },
@@ -461,7 +347,7 @@ export function HarnessRsi({ src, demo = false }) {
         h(UI.StatCard, { label: t('statSignals'), value: data ? data.signals.length : '—' }),
         h(UI.StatCard, { label: t('statPrompts'), value: changes ? changes.length : '—' })),
       h(UI.SegmentedControl, { ariaLabel: t('tabsAria'), value: tab, onChange: setTab, wrap: true,
-        segments: TABS.map((k) => ({ key: k, label: t(`tab_${k}`), ...(counts[k] != null ? { count: counts[k] } : {}) })) }),
+        segments: TABS.map((k) => ({ key: k, label: t(`tab_${k}`) })) }),
       h('div', { className: MUTED, 'aria-live': 'polite', 'data-testid': 'note' }, note),
       h('div', { role: 'region', 'aria-label': t(`tab_${tab}`), 'data-testid': `panel-${tab}` }, body))))
 }
