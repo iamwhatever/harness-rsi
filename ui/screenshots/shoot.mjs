@@ -2,7 +2,7 @@
 // theme and i18n; nothing talks to a gateway. Needs a KiroCrew website checkout:
 //   KIROCREW_WEBSITE=/path/to/KiroCrew/website node ui/screenshots/shoot.mjs
 // RSI_LANG=en|zh (host locale), RSI_W=width (default 1440), RSI_OUT=dir: every tab as <tab>-<lang>-<width>.png.
-// RSI_ONLY=home: only Home and Home with Details open. RSI_ONLY=needs: only Needs you.
+// RSI_ONLY=home: only Home and Home with Details open; RSI_ONLY=needs: those and Needs you; RSI_ONLY=work: those and Work.
 // RSI_UX=v2: the UX v2 mockup (ui/v2.mjs) instead, every view as v2-<view>-<lang>-<width>.png.
 import fs from 'node:fs'
 import os from 'node:os'
@@ -64,7 +64,7 @@ const server = await createServer({
 await server.listen()
 const browser = await (pw.chromium || pw.default.chromium).launch({ executablePath: process.env.CHROMIUM_PATH || undefined })
 const errors = []
-const TABS = { en: ['Home', 'Needs you', 'Board', 'Signals', 'Rounds', 'Prompt changes', 'Team', 'Settings'], zh: ['首页', '等你处理', '看板', '信号', '轮次', '提示词改动', '团队', '设置'] }[LANG]
+const TABS = { en: ['Home', 'Needs you', 'Work', 'Board', 'Prompt changes', 'Settings'], zh: ['首页', '等你处理', '进行中', '看板', '提示词改动', '设置'] }[LANG]
 try {
   const page = await browser.newPage({ viewport: { width: W, height: 900 }, reducedMotion: 'reduce', locale: LANG === 'zh' ? 'zh-CN' : 'en-US' })
   page.on('pageerror', (e) => errors.push(e.message))
@@ -118,6 +118,10 @@ try {
   await shoot('needs')
   if (process.env.RSI_ONLY === 'needs') throw 'done'
   await pickTab(TABS[2])
+  await page.getByTestId('panel-work').getByTestId('work-row').first().waitFor({ timeout: 30000 })
+  await shoot('work')
+  if (process.env.RSI_ONLY === 'work') throw 'done'
+  await pickTab(TABS[3])
   const cards = page.getByTestId('proposal-card')
   await cards.first().waitFor({ timeout: 30000 })
   // Keyboard: a focused decision button is pressed with Enter.
@@ -131,8 +135,8 @@ try {
   await page.getByTestId('dispatch-all').click()
   await page.getByTestId('dispatch-result').first().waitFor()
   await shoot('board-dispatched')
-  for (const [i, name] of ['signals', 'rounds', 'prompts', 'team', 'settings'].entries()) {
-    await pickTab(TABS[i + 3])
+  for (const [i, name] of ['prompts', 'settings'].entries()) {
+    await pickTab(TABS[i + 4])
     await page.getByTestId(`panel-${name}`).waitFor()
     if (name === 'prompts') await page.getByTestId('prompt-change-card').locator('summary').click()
     await shoot(name)
@@ -143,4 +147,4 @@ try {
   fs.rmSync(tmp, { recursive: true, force: true })
 }
 if (errors.length) { console.error(errors.join('\n')); process.exit(1) }
-console.log(`wrote ${V2 ? 5 : process.env.RSI_ONLY === 'home' ? 2 : process.env.RSI_ONLY === 'needs' ? 1 : 10} shots for ${LANG} at ${W}px to ${OUT}`)
+console.log(`wrote ${V2 ? 5 : ({ home: 2, needs: 3, work: 4 })[process.env.RSI_ONLY] || 8} shots for ${LANG} at ${W}px to ${OUT}`)

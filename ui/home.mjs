@@ -1,10 +1,10 @@
 // The Home tab (docs/design/ux-v2.md §5.1) on live data: is it running, the setup checklist, one primary
-// action (Run round, with what it does and what it costs), and folded Details. Every number names its
+// action (Run round, with what it does and what it costs), and folded Details: signals, runs and jobs, raw A/B, the Team tree. Every number names its
 // source (the route it came from) and a time; every empty state names the next step. Words come from strings.mjs.
 import { createElement as h } from 'react'
 import * as UI from '@kirocrew/app-sdk/ui'
 import { getLang, t } from './strings.mjs'
-import { RunRound, Runs, Signals } from './index.mjs'
+import { RunRound, Runs, Signals, Team, jobText, regressText, roundText, slackNote } from './index.mjs'
 
 const LABEL = 'text-[11px] uppercase tracking-wide text-muted font-semibold mb-1'
 const MUTED = 'text-[13px] text-muted'
@@ -38,7 +38,7 @@ export function nextLine(sched) {
 }
 
 const count = (signals, prefix) => signals.filter((s) => String(s.source).startsWith(prefix)).length
-/** The setup checklist on live state. ``ok`` null is a choice, not a step (trust). ``fix`` is the tab that fixes it. */
+/** The setup checklist on live state. ``ok`` null is a choice, not a step (trust). ``fix`` is the tab that fixes it, or ``refresh``. */
 export function checklist({ settings, sched, job, disp, round, signals = [], readAt }) {
   const conf = sched?.schedule
   const gh = count(signals, 'github:'), chats = count(signals, 'session:')
@@ -46,7 +46,7 @@ export function checklist({ settings, sched, job, disp, round, signals = [], rea
   return [
     { key: 'slack', ok: !!settings?.command_set, route: '/settings', when: readAt, fix: 'settings',
       text: settings?.command_set ? t('slackOn', { n: settings.channels.length, days: settings.window_days }) : t('home_slackNo') },
-    { key: 'github', ok: !!(job?.finished_at && !job.error) || gh > 0, route: '/refresh/status', when: job?.finished_at || readAt, fix: 'signals',
+    { key: 'github', ok: !!(job?.finished_at && !job.error) || gh > 0, route: '/refresh/status', when: job?.finished_at || readAt, fix: 'refresh',
       text: job?.error ? t('ghFailed', { at: at(job.finished_at), e: job.error }) : job?.finished_at ? t('ghDone', { n: job.rows, at: at(job.finished_at) })
         : gh ? t('home_ghRows', { n: gh }) : t('home_ghNo') },
     { key: 'chats', ok: chats > 0 && !chatErr, route: '/signals', when: readAt, fix: null,
@@ -59,7 +59,6 @@ export function checklist({ settings, sched, job, disp, round, signals = [], rea
 }
 const stepBadge = (x) => (x.ok === null ? h(UI.Badge, { variant: x.on ? 'warn' : 'muted' }, t(x.on ? 'home_on' : 'home_off'))
   : h(UI.Badge, { variant: x.ok ? 'ok' : 'warn' }, t(x.ok ? 'home_stepDone' : 'home_stepOpen')))
-const FIX = { settings: 'home_fixSettings', signals: 'home_fixSignals' }
 
 /** A plain link-styled button that moves to another tab. */
 const TabLink = ({ to, label, go, testId }) => h('button', { type: 'button', 'data-testid': testId, 'data-to': to, onClick: () => go(to),
@@ -78,7 +77,7 @@ function RawAb({ change: c }) {
 }
 
 /** The Home tab body. ``readAt`` is when the page last read the routes that carry no time of their own. */
-export function Home({ round, sched, settings, job, disp, signals = [], changes = [], readAt, go, armed, setArmed, runRound }) {
+export function Home({ round, sched, settings, job, disp, signals = [], changes = [], readAt, go, armed, setArmed, runRound, refresh, regress, team, scoreLine }) {
   const conf = sched?.schedule
   const list = checklist({ settings, sched, job, disp, round, signals, readAt })
   const steps = list.filter((x) => x.ok !== null)
@@ -97,7 +96,8 @@ export function Home({ round, sched, settings, job, disp, signals = [], changes 
     h(UI.Card, { 'data-testid': 'home-setup' }, h('div', { className: LABEL }, t('home_setupTitle', { done: steps.filter((x) => x.ok).length, n: steps.length })),
       h('ul', { className: 'list-none m-0 p-0' }, list.map((x) => h('li', { key: x.key, 'data-testid': 'setup-step', 'data-key': x.key, 'data-ok': String(x.ok), className: 'py-1.5' },
         row(stepBadge(x), h('span', { className: 'text-text-strong' }, t(`home_step_${x.key}`)), h(Src, { route: x.route, when: x.when }),
-          x.fix && x.ok !== true ? h(TabLink, { to: x.fix, label: t(FIX[x.fix]), go, testId: 'setup-fix' }) : null),
+          x.fix === 'refresh' && x.ok !== true ? h(UI.Btn, { type: 'button', onClick: refresh, 'data-testid': 'setup-refresh' }, t('refresh'))
+            : x.fix && x.ok !== true ? h(TabLink, { to: x.fix, label: t('home_fixSettings'), go, testId: 'setup-fix' }) : null),
         h('div', { className: MUTED }, x.text))))),
     h(UI.Card, { 'data-testid': 'home-act' }, h('div', { className: LABEL }, t('home_actTitle')),
       row(h(RunRound, { primary: true, armed, running: !!round?.running, onArm: () => setArmed(true), onConfirm: runRound, onCancel: () => setArmed(false) })),
@@ -108,7 +108,15 @@ export function Home({ round, sched, settings, job, disp, signals = [], changes 
       h('summary', { className: MUTED }, t('home_detailsTitle')),
       stack(
         h('div', { className: MUTED }, t('home_detailsSignals'), ' ', h(Src, { route: '/signals', when: readAt })),
+        row(h(UI.Btn, { type: 'button', onClick: refresh, 'data-testid': 'details-refresh' }, t('refresh')),
+          h('span', { className: MUTED, 'data-testid': 'github-job' }, jobText(job)), h(Src, { route: '/refresh/status' })),
+        settings && !settings.command_set ? h('div', { className: MUTED, 'data-testid': 'slack-off' }, slackNote(null)) : null,
         h(Signals, { signals }),
+        h(UI.Card, { 'data-testid': 'details-jobs' }, h('div', { className: LABEL }, t('jobsTitle')),
+          h('div', { className: MUTED, 'data-testid': 'round-job' }, roundText(round) || t('roundNever')),
+          h('div', { className: MUTED, 'data-testid': 'regress' }, regressText(regress)),
+          scoreLine ? h('div', { className: MUTED }, scoreLine) : null),
         h(UI.Card, null, h(Runs, { runs: sched?.runs || [] }), h(Src, { route: '/schedule', when: sched?.read_at })),
-        ...(ab.length ? ab.map((c) => h(RawAb, { key: c.id, change: c })) : [h('div', { key: 'no-ab', className: MUTED, 'data-testid': 'home-no-ab' }, t('home_noAb'))]))))
+        ...(ab.length ? ab.map((c) => h(RawAb, { key: c.id, change: c })) : [h('div', { key: 'no-ab', className: MUTED, 'data-testid': 'home-no-ab' }, t('home_noAb'))]),
+        h('div', { key: 'team', 'data-testid': 'details-team' }, h('div', { className: LABEL }, t('tab_team')), h(Team, { team }), h(Src, { route: '/team' })))))
 }

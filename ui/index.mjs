@@ -326,8 +326,9 @@ export function Team({ team }) {
       team.loose_lanes.map((r) => h(Reporter, { key: r.key, rec: r, staleMinutes: m }))) : null)
 }
 
-/** Home first (docs/design/ux-v2.md); the other tabs stay until the v2 Needs-you and Work tabs replace them. */
-export const TABS = ['home', 'needs', 'work', 'board', 'signals', 'rounds', 'prompts', 'team', 'settings']
+/** docs/design/ux-v2.md: Home, Needs you, Work, Settings; Signals, Rounds and Team fold into Home's Details.
+ *  Board and Prompt changes stay until Needs you and Work cover them. */
+export const TABS = ['home', 'needs', 'work', 'board', 'prompts', 'settings']
 const why = (e) => String(e?.message || e)
 const clock = (s) => new Date(s * 1000).toLocaleTimeString(getLang(), { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
 /** One line for the GitHub job (it runs for minutes after a refresh). */
@@ -430,21 +431,12 @@ export function HarnessRsi({ src, demo = false }) {
   const pending = (data?.proposals || []).filter((p) => !p.decision).length
   const panels = {
     home: () => [h(Home, { key: 'home', round, sched, settings: form?.saved, job, disp, signals: data.signals, changes: changes || [], readAt,
-      go: setTab, armed, setArmed, runRound })],
+      go: setTab, armed, setArmed, runRound, refresh, regress, team, scoreLine: scoreJobText(out?.score) })],
     needs: () => [h(Needs, { key: 'needs', proposals: data.proposals, signals: data.signals, out, disp, changes, team, sched, readAt, results, onDecide: decide, onDispatch: dispatchCards, onPrompt: decidePrompt })],
     work: () => [h(Work, { key: 'w', proposals: data.proposals, out, team, onScore: score, scoreBusy: scoreRunning(out), scoreLine: scoreJobText(out?.score) })],
     board: () => [toolbar(h(UI.Btn, { type: 'button', onClick: score, disabled: scoreRunning(out) }, t('scorePrs')), h('span', { className: MUTED, 'data-testid': 'score-job' }, scoreJobText(out?.score))),
       h(Board, { proposals: data.proposals, images: data.images, signals: data.signals, onDecide: decide, outcomes: out?.outcomes, onLink: linkPr, dispatches: out?.dispatches,
         onDispatch: dispatchCards, results, selected, onSelect: select })],
-    signals: () => [toolbar(h(UI.Btn, { type: 'button', onClick: refresh }, t('refresh')), h('span', { className: MUTED, 'data-testid': 'github-job' }, jobText(job))),
-      form && !form.saved.command_set ? h('div', { key: 's', className: `${MUTED} mb-3`, 'data-testid': 'slack-off' }, slackNote(null)) : null,
-      h(Signals, { signals: data.signals })],
-    rounds: () => [toolbar(h(RunRound, { armed, running: isRunning(round), onArm: () => setArmed(true), onConfirm: runRound, onCancel: () => setArmed(false) })),
-      h(UI.Card, { key: 'jobs' }, h('div', { className: LABEL }, t('jobsTitle')),
-        h('div', { 'data-testid': 'round-job' }, lines(roundText(round) || t('roundNever'))), h('div', { 'data-testid': 'regress' }, lines(regressText(regress))),
-        lines(jobText(job), scoreJobText(out?.score))),
-      h(UI.Card, { key: 'runs' }, h(Runs, { runs: sched?.runs || [] }))],
-    team: () => [h(Team, { key: 't', team })],
     prompts: () => [(changes || []).length ? changes.map((c) => h(PromptChangeCard, { key: c.id, change: c, onDecide: decidePrompt })) : empty(Wand2, 'noPromptChanges')],
     settings: () => [form ? h(SettingsForm, { key: 'f', form, note: formNote, onSave: save, onChange: (f) => setForm([f, '']) }) : lines(formNote),
       sched ? h(ScheduleForm, { key: 's', conf: sched.schedule, note: schedNote, onSave: saveSched, onChange: (c) => setSched([{ ...sched, schedule: c }, '']) }) : null,
@@ -452,7 +444,7 @@ export function HarnessRsi({ src, demo = false }) {
   }
   const body = error ? h(UI.ErrorNotice, { title: t('loadFailed'), message: error, testId: 'load-error' })
     : !data ? h(UI.ContentSkeleton, { rows: 4 }) : stack(...panels[tab]())
-  const counts = { board: data?.proposals.length, signals: data?.signals.length, prompts: changes?.length }
+  const counts = { board: data?.proposals.length, prompts: changes?.length }
   return h('div', { className: 'flex-1 min-w-0 flex flex-col min-h-0', lang: getLang() },
     h(UI.PageHeader, { title: t('title'), subtitle: t('subtitle') }),
     h('div', { className: 'flex-1 overflow-y-auto px-4 md:px-6 pb-8 min-h-0' }, h('div', { className: 'max-w-4xl flex flex-col gap-3' },
