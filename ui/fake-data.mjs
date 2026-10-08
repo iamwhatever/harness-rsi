@@ -16,7 +16,11 @@ export const promptChange = { id: 'pc_0123456789', agent: 'rsi-question-setter',
 export const isDemo = (search) => new URLSearchParams(search || '').get('demo') === '1'
 const job = { running: false, started_at: null, finished_at: null, rows: null, error: '' }
 const schedule = { schedule: { round_enabled: false, regress_enabled: false, score_enabled: false, weekday: 0, hour: 9, kirocrew_dir: '' },
-  runs: [{ kind: 'round', start: '2026-01-05T09:05:00+00:00', end: '2026-01-05T10:05:00+00:00', signals: 10, cards: 3, error: '' }] }
+  runs: [{ kind: 'manual_round', start: '2026-01-05T09:05:00+00:00', end: '2026-01-05T10:05:00+00:00', duration_s: 3600, cost: null, signals: 10, cards: 3, error: '' },
+    { kind: 'round', start: '2025-12-29T09:05:00+00:00', end: '2025-12-29T09:55:00+00:00', duration_s: 3000, cost: null, signals: 8, cards: 3, error: '' }],
+  // GET /schedule's own answers: no next round while the weekly round is off; the last-3 average of good rounds.
+  next_round_at: null, read_at: '2026-01-06T09:10:00+00:00',
+  round_stats: { n: 2, avg_duration_s: 3300, avg_cost: null, from: '2025-12-29T09:05:00+00:00', to: '2026-01-05T10:05:00+00:00' } }
 const settings = { command_set: false, channels: ['C0FAKE00001'], window_days: 14, workspace_url: '' }
 const dispatch = { auto_dispatch: false, repos: ['example-org/example-repo'], daily_cap: 2, trust_dispatched: false }
 /** The backendSource shape over the fixtures: every read answers fake rows, every write is kept in memory only. */

@@ -128,8 +128,8 @@ flowchart LR
 
 | 缺口 | 影响哪个元素 | 建议 |
 |---|---|---|
-| 没有下一轮时间 | 首页「下一轮」 | `GET /schedule` 返回 `next_round_at`（用 `round_due` 同一套规则） |
-| 没有每轮时长和花费 | 「运行一轮」的花费说明 | `schedule-runs.jsonl` 写上 `cost`；首页显示近 3 轮平均 |
+| 没有下一轮时间 | 首页「下一轮」 | 已补：`GET /schedule` 返回 `next_round_at`（用 `round_due` 同一套规则） |
+| 没有每轮时长和花费 | 「运行一轮」的花费说明 | 已补：每行写 `duration_s` 和 `cost`（额度；小组还不报时为空，页面写「不知道」）；手动一轮记为 `manual_round`；`GET /schedule` 的 `round_stats` 给近 3 轮平均 |
 | 没有 A/B 的运行时间和命令 | 「换成 B」的证据 | `crew/ab.py` 在 `ab` 里写 `ran_at` 和 `command` |
 | 没有 CI 状态 | 进行中的「CI」格、合并 PR 的证据 | `GET /outcomes` 带上 PR 的检查汇总 |
 | 没有今天已用名额 | 「开工作对话」的名额说明 | `GET /dispatch` 返回 `used_today` |

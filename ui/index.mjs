@@ -9,6 +9,7 @@ import Lucide from 'lucide-react'
 import { getLang, has, pickLang, setLang, t } from './strings.mjs'
 import { demoSource, isDemo } from './fake-data.mjs'
 import { HarnessRsiV2, isUxV2 } from './v2.mjs'
+import { Home } from './home.mjs'
 
 const { History, Inbox, Radio, Users, Wand2 } = Lucide
 const BASE = '/api/apps/harness-rsi'
@@ -136,14 +137,15 @@ const DispatchPick = ({ p, selected, onSelect, onDispatch }) => h('div', { class
 
 const at = (s) => (s ? new Date(s).toLocaleString(getLang(), { dateStyle: 'short', timeStyle: 'short', hourCycle: 'h23' }) : '')
 /** One line of result for a run record. */
-export const runResult = (r) => (r.error ? t('runFailed', { e: r.error }) : r.kind === 'round' ? t('runCards', { cards: r.cards, signals: r.signals })
+export const runResult = (r) => (r.error ? t('runFailed', { e: r.error }) : r.kind === 'round' || r.kind === 'manual_round' ? t('runCards', { cards: r.cards, signals: r.signals })
   : t(r.regressions ? 'runRegress' : 'runClean', { n: r.regressions, sha: String(r.sha || '').slice(0, 7) }))
-/** The last scheduled runs, newest first. */
+const JOB = { round: 'jobRound', manual_round: 'jobManual', regress: 'jobRegress' }
+/** The last runs (scheduled and manual rounds, regressions), newest first. */
 export function Runs({ runs }) {
-  if (!runs.length) return h(UI.EmptyState, { icon: h(History, { size: 28 }), title: t('noRuns'), testId: 'no-runs' })
+  if (!runs.length) return h(UI.EmptyState, { icon: h(History, { size: 28 }), title: t('noRuns'), subtitle: t('noRunsHint'), testId: 'no-runs' })
   return h(Table, { caption: t('runsTitle'), cols: [t('colJob'), t('colStarted'), t('colEnded'), t('colResult')], testId: 'schedule-runs' },
     runs.map((r) => h('tr', { key: r.kind + r.start, 'data-testid': 'run-row' },
-      [t(r.kind === 'round' ? 'jobRound' : 'jobRegress'), at(r.start), at(r.end), runResult(r)].map((c, i) => h('td', { key: i, className: TD }, c)))))
+      [t(JOB[r.kind] || 'jobRegress'), at(r.start), at(r.end), runResult(r)].map((c, i) => h('td', { key: i, className: TD }, c)))))
 }
 
 export const DECISIONS = ['do', 'skip', 'later']
@@ -322,7 +324,8 @@ export function Team({ team }) {
       team.loose_lanes.map((r) => h(Reporter, { key: r.key, rec: r, staleMinutes: m }))) : null)
 }
 
-export const TABS = ['board', 'signals', 'rounds', 'prompts', 'team', 'settings']
+/** Home first (docs/design/ux-v2.md); the other tabs stay until the v2 Needs-you and Work tabs replace them. */
+export const TABS = ['home', 'board', 'signals', 'rounds', 'prompts', 'team', 'settings']
 const why = (e) => String(e?.message || e)
 const clock = (s) => new Date(s * 1000).toLocaleTimeString(getLang(), { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
 /** One line for the GitHub job (it runs for minutes after a refresh). */
@@ -339,9 +342,9 @@ export const roundText = (r) => (!r ? '' : r.running ? t('roundRunning', { n: r.
   : !r.finished_at ? t('roundNever') : r.error ? t('roundFailed', { n: r.round, at: clock(r.finished_at), e: r.error })
     : [t('roundDone', { n: r.round, p: r.counts.proposals, s: r.counts.signals, at: clock(r.finished_at) }), ...r.notes].join(' · '))
 /** Run round, two steps: the first click arms, the second confirms. */
-export function RunRound({ armed, running, onArm, onConfirm, onCancel }) {
+export function RunRound({ armed, running, onArm, onConfirm, onCancel, primary = false }) {
   if (running) return h(UI.Btn, { type: 'button', disabled: true }, t('roundBusy'))
-  if (!armed) return h(UI.Btn, { type: 'button', onClick: onArm, 'data-testid': 'round-arm' }, t('roundArm'))
+  if (!armed) return h(UI.Btn, { type: 'button', primary, onClick: onArm, 'data-testid': 'round-arm' }, t('roundArm'))
   return h('span', { className: 'flex gap-2' },
     h(UI.Btn, { type: 'button', primary: true, onClick: onConfirm, 'data-testid': 'round-confirm' }, t('roundConfirm')),
     h(UI.Btn, { type: 'button', onClick: onCancel }, t('cancel')))
@@ -362,22 +365,24 @@ const isRunning = (x) => !!x?.running, scoreRunning = (x) => !!x?.score?.running
 
 /** The page body over one data source (backendSource or demoSource). */
 export function HarnessRsi({ src, demo = false }) {
-  const [tab, setTab] = useState('board')
+  const [tab, setTab] = useState('home')
+  const [readAt, setReadAt] = useState(null)
   const [note, setNote] = useState('')
   const [[data, error], setState] = useState([null, ''])
-  const reload = useCallback(() => src.load().then((d) => setState([d, '']), (e) => setState([null, why(e)])), [src])
+  const reload = useCallback(() => src.load().then((d) => { setState([d, '']); setReadAt(new Date().toISOString()) }, (e) => setState([null, why(e)])), [src])
   useEffect(() => { reload() }, [reload])
   const [changes, setChanges] = usePolled(src.promptChanges, () => false)
   const [team] = usePolled(src.team, () => false)
   const [out, setOut] = usePolled(src.outcomes, scoreRunning)
   const [job, setJob] = usePolled(src.status, isRunning, reload)
-  const [round, setRound] = usePolled(src.round, isRunning, reload)
+  const [[sched, schedNote], setSched] = useState([null, ''])
+  const readSched = useCallback(() => src.schedule().then((v) => setSched([v, '']), () => {}), [src])
+  const [round, setRound] = usePolled(src.round, isRunning, () => { reload(); readSched() })
   const [regress] = usePolled(src.regress, () => false)
   const [armed, setArmed] = useState(false)
   const [[form, formNote], setForm] = useState([null, ''])
   useEffect(() => { src.settings().then((v) => setForm([toForm(v), '']), (e) => setForm([null, why(e)])) }, [src])
-  const [[sched, schedNote], setSched] = useState([null, ''])
-  useEffect(() => { src.schedule().then((v) => setSched([v, '']), () => {}) }, [src])
+  useEffect(() => { readSched() }, [readSched])
   const [[disp, dispNote], setDisp] = useState([null, ''])
   const [results, setResults] = useState({})
   const [selected, setSelected] = useState([])
@@ -421,6 +426,8 @@ export function HarnessRsi({ src, demo = false }) {
   const lines = (...xs) => xs.filter(Boolean).map((x, i) => h('div', { key: i, className: MUTED }, x))
   const pending = (data?.proposals || []).filter((p) => !p.decision).length
   const panels = {
+    home: () => [h(Home, { key: 'home', round, sched, settings: form?.saved, job, disp, signals: data.signals, changes: changes || [], readAt,
+      go: setTab, armed, setArmed, runRound })],
     board: () => [toolbar(h(UI.Btn, { type: 'button', onClick: score, disabled: scoreRunning(out) }, t('scorePrs')), h('span', { className: MUTED, 'data-testid': 'score-job' }, scoreJobText(out?.score))),
       h(Board, { proposals: data.proposals, images: data.images, signals: data.signals, onDecide: decide, outcomes: out?.outcomes, onLink: linkPr, dispatches: out?.dispatches,
         onDispatch: dispatchCards, results, selected, onSelect: select })],

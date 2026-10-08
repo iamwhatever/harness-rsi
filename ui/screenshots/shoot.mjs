@@ -2,6 +2,7 @@
 // theme and i18n; nothing talks to a gateway. Needs a KiroCrew website checkout:
 //   KIROCREW_WEBSITE=/path/to/KiroCrew/website node ui/screenshots/shoot.mjs
 // RSI_LANG=en|zh (host locale), RSI_W=width (default 1440), RSI_OUT=dir: every tab as <tab>-<lang>-<width>.png.
+// RSI_ONLY=home: only Home and Home with Details open.
 // RSI_UX=v2: the UX v2 mockup (ui/v2.mjs) instead, every view as v2-<view>-<lang>-<width>.png.
 import fs from 'node:fs'
 import os from 'node:os'
@@ -63,7 +64,7 @@ const server = await createServer({
 await server.listen()
 const browser = await (pw.chromium || pw.default.chromium).launch({ executablePath: process.env.CHROMIUM_PATH || undefined })
 const errors = []
-const TABS = { en: ['Board', 'Signals', 'Rounds', 'Prompt changes', 'Team', 'Settings'], zh: ['看板', '信号', '轮次', '提示词改动', '团队', '设置'] }[LANG]
+const TABS = { en: ['Home', 'Board', 'Signals', 'Rounds', 'Prompt changes', 'Team', 'Settings'], zh: ['首页', '看板', '信号', '轮次', '提示词改动', '团队', '设置'] }[LANG]
 try {
   const page = await browser.newPage({ viewport: { width: W, height: 900 }, reducedMotion: 'reduce', locale: LANG === 'zh' ? 'zh-CN' : 'en-US' })
   page.on('pageerror', (e) => errors.push(e.message))
@@ -79,6 +80,19 @@ try {
     if (wide.length) errors.push(`${name}: wider than ${W}px: ${wide.join(' | ')}`)
     await page.screenshot({ path: path.join(OUT, `${name}-${LANG}-${W}.png`) })
   }
+  // On a narrow screen the host's tab bar folds into a dropdown: open it first, then pick the tab.
+  const pickTab = async (label) => {
+    const radio = page.getByRole('radio', { name: new RegExp(`^${label}`) })
+    if (!(await radio.count())) {
+      await page.setViewportSize({ width: W, height: 900 })  // the last shot grew it; let the dropdown settle at a normal size
+      await page.locator('button[aria-expanded]').first().click()
+      await radio.waitFor()
+      // The open dropdown re-renders while it measures itself, so a pointer click never sees it stable: click it in the page.
+      await page.evaluate((l) => [...document.querySelectorAll('[role=radio]')].find((e) => e.textContent.startsWith(l))?.click(), label)
+      return
+    }
+    await radio.click()
+  }
   await page.goto('http://127.0.0.1:5291/index.html')
   if (V2) {
     const VIEWS = { en: ['Home', 'Needs you', 'Work', 'Settings'], zh: ['首页', '等你处理', '进行中', '设置'] }[LANG]
@@ -93,6 +107,13 @@ try {
     }
     throw 'done'
   }
+  // The page opens on Home; Details is folded until clicked.
+  await page.getByTestId('panel-home').getByTestId('home-status').waitFor({ timeout: 30000 })
+  await shoot('home')
+  await page.getByTestId('home-details').locator('summary').click()
+  await shoot('home-details')
+  if (process.env.RSI_ONLY === 'home') throw 'done'
+  await pickTab(TABS[1])
   const cards = page.getByTestId('proposal-card')
   await cards.first().waitFor({ timeout: 30000 })
   // Keyboard: a focused decision button is pressed with Enter.
@@ -107,7 +128,7 @@ try {
   await page.getByTestId('dispatch-result').first().waitFor()
   await shoot('board-dispatched')
   for (const [i, name] of ['signals', 'rounds', 'prompts', 'team', 'settings'].entries()) {
-    await page.getByRole('radio', { name: new RegExp(`^${TABS[i + 1]}`) }).click()
+    await pickTab(TABS[i + 2])
     await page.getByTestId(`panel-${name}`).waitFor()
     if (name === 'prompts') await page.getByTestId('prompt-change-card').locator('summary').click()
     await shoot(name)
@@ -118,4 +139,4 @@ try {
   fs.rmSync(tmp, { recursive: true, force: true })
 }
 if (errors.length) { console.error(errors.join('\n')); process.exit(1) }
-console.log(`wrote ${V2 ? 5 : 7} shots for ${LANG} at ${W}px to ${OUT}`)
+console.log(`wrote ${V2 ? 5 : process.env.RSI_ONLY === 'home' ? 2 : 9} shots for ${LANG} at ${W}px to ${OUT}`)
