@@ -2,7 +2,8 @@
 // would show (title, label, subtitle, message) becomes text, so the string-table check can see it.
 import { createElement as h } from 'react'
 
-const pass = (tag) => ({ children, primary, variant, ...rest }) => h(tag, rest, children)
+// A primary button keeps a data-primary mark, so a check can count the primary actions on a screen.
+const pass = (tag) => ({ children, primary, variant, ...rest }) => h(tag, primary ? { ...rest, 'data-primary': true } : rest, children)
 export const Card = pass('div'), Btn = pass('button'), Badge = pass('span'), Input = pass('input')
 export const PageHeader = ({ title, subtitle }) => h('header', null, title, subtitle)
 export const EmptyState = ({ title, subtitle, testId = 'empty-state' }) => h('div', { 'data-testid': testId }, title, subtitle)

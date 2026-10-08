@@ -7,7 +7,8 @@ one-shot job (at most one at a time; it takes minutes) whose rows merge when it 
 ``GET /refresh/status`` reports that job. ``GET``/``POST /settings`` show and change the
 Slack settings (``backend.settings``). ``POST /round/run`` runs one design-crew round
 (``backend.round_job``) with these same Slack and GitHub sources plus the owner's sessions; ``GET /round/status``
-reports it. ``/schedule`` and ``/schedule/tick``: the owner's opt-in weekly round and daily
+reports it and, when it ends, writes a ``manual_round`` run row. ``GET /schedule`` also
+answers ``next_round_at`` and ``round_stats`` (the last-3 average). ``/schedule`` and ``/schedule/tick``: the owner's opt-in weekly round and daily
 regress (``backend.schedule``), off by default. ``GET /outcomes`` reads the outcome ledger
 and the scoring job; ``POST /outcomes/link`` links a card to a KiroCrew PR; ``POST /score/run``
 starts ``python -m backend.autoscore`` (single-flight; the tick does when scoring is on).
@@ -279,9 +280,25 @@ async def _round_run(request, ctx):
         return _err(400, "bad_round", "round must be 1-9999")
     if JOB["running"]:
         return _err(409, "refresh_running", "a GitHub refresh is running; run the round when it ends")
-    if not round_job.start(rnd, round_sources()):
+    started = CLOCK()
+    if (task := round_job.start(rnd, round_sources())) is None:
         return _err(409, "round_running", "a round is already running")
+    _hold(_record_manual(task, started))
     return web.json_response({"ok": True, "round": round_job.view()}, status=202)
+
+
+def _hold(job):
+    """Run ``job`` as a task held in ``SCHEDULED`` until it ends."""
+    task = asyncio.get_running_loop().create_task(job)
+    SCHEDULED.add(task)
+    task.add_done_callback(SCHEDULED.discard)
+
+
+async def _record_manual(task, started):
+    """A manual round's run row, so Home's average covers it; the weekly rule reads only ``round`` rows."""
+    counts, error = await task
+    await asyncio.to_thread(schedule.record, "manual_round", started, CLOCK(), signals=counts.get("signals"),
+                            cards=counts.get("proposals", 0), error=error)
 
 
 async def _round_status(request, ctx):
@@ -289,8 +306,10 @@ async def _round_status(request, ctx):
 
 
 async def _schedule_get(request, ctx):
-    conf, runs = await asyncio.to_thread(lambda: (schedule.read(), schedule.runs()))
-    return web.json_response({"ok": True, "schedule": conf, "runs": runs})
+    conf, runs, stats = await asyncio.to_thread(lambda: (schedule.read(), schedule.runs(), schedule.round_stats()))
+    now = CLOCK()
+    return web.json_response({"ok": True, "schedule": conf, "runs": runs, "next_round_at": schedule.next_round_at(conf, now),
+                              "round_stats": stats, "read_at": now.isoformat(timespec="seconds")})
 
 
 async def _schedule_post(request, ctx):
@@ -310,9 +329,7 @@ async def _schedule_tick(request, ctx):
     on = conf["score_enabled"] and conf["kirocrew_dir"]
     out["score"] = "off" if not on else "started" if start_score(conf["kirocrew_dir"]) else "busy"
     for job in jobs:
-        task = asyncio.get_running_loop().create_task(job)
-        SCHEDULED.add(task)
-        task.add_done_callback(SCHEDULED.discard)
+        _hold(job)
     return web.json_response({"ok": True, **out})
 
 

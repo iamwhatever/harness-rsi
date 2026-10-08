@@ -5,6 +5,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import { createElement as h, __settle } from 'react'
 import Page, { HarnessRsi, TABS } from './ui/index.mjs'
+import { checklist, lastRound, nextLine, roundCost } from './ui/home.mjs'
 import { TABLE, setLang } from './ui/strings.mjs'
 import { demoSource, promptChange, team } from './ui/fake-data.mjs'
 
@@ -20,9 +21,9 @@ const tabTo = async (render, tree, tab) => {
 }
 /** Every tab's tree, after the page has settled on each. */
 async function everyTab(render) {
-  const trees = { board: await __settle(render, true) }
-  for (const tab of TABS.slice(1)) trees[tab] = await tabTo(render, trees.board, tab)
-  await tabTo(render, trees.board, 'board')
+  const trees = { home: await __settle(render, true) }
+  for (const tab of TABS.slice(1)) trees[tab] = await tabTo(render, trees.home, tab)
+  await tabTo(render, trees.home, 'home')
   return trees
 }
 
@@ -31,10 +32,32 @@ globalThis.location = { search: '?demo=1' }
 globalThis.__api = { get: async () => { throw new Error('demo mode must not call the backend') }, post: async () => { throw new Error('no') } }
 const page = () => expand(h(Page))
 const demo = await everyTab(page)
-assert.equal(byTest(demo.board, 'demo-note').length, 1)
+assert.equal(TABS[0], 'home', 'Home is the first tab')
+assert.equal(byTest(demo.home, 'demo-note').length, 1)
+assert.equal(byTest(demo.home, 'proposal-card').length, 0, 'the page opens on Home, not the board')
+assert.deepEqual(byTest(demo.home, 'setup-step').map((n) => n.props['data-key']), ['slack', 'github', 'chats', 'schedule', 'trust'])
+assert.deepEqual(byTest(demo.home, 'setup-step').map((n) => n.props['data-ok']), ['false', 'true', 'true', 'false', 'null'])
+assert.equal(byTest(demo.home, 'home-switch').length, 3, 'the three schedule switches show as badges')
+// One primary action, Run round, with what it does and the last rounds' average.
+const prim = all(demo.home).filter((n) => n.type === 'button' && n.props['data-primary'])
+assert.deepEqual(prim.map((n) => n.props['data-testid']), ['round-arm'])
+assert.equal(byTest(demo.home, 'round-cost')[0].children.filter((c) => typeof c === 'string').join(''), 'Last 2 round(s) took 55 min on average; cost: unknown (not measured yet). ')
+assert.equal(byTest(demo.home, 'home-details').length, 1, 'signals, runs and raw A/B are folded on Home')
+assert.equal(byTest(demo.home, 'signal-row').length, signals.length)
+assert.equal(byTest(demo.home, 'home-raw-ab').length, 1)
+assert.ok(byTest(demo.home, 'src').length >= 10, 'every number names its source')
+// A fix link moves to the tab that fixes the step; the other tabs stay reachable after Home.
+{
+  const fixes = byTest(demo.home, 'setup-fix')
+  assert.deepEqual(fixes.map((n) => n.props['data-to']), ['settings', 'settings', 'settings'])
+  fixes[0].props.onClick()
+  const there = await __settle(page)
+  assert.equal(byTest(there, 'slack-configured').length, 1, 'Fix in Settings opens Settings')
+  await tabTo(page, there, 'home')
+}
 assert.equal(byTest(demo.board, 'proposal-card').length, proposals.length)
 assert.equal(byTest(demo.signals, 'signal-row').length, signals.length)
-assert.equal(byTest(demo.rounds, 'run-row').length, 1)
+assert.equal(byTest(demo.rounds, 'run-row').length, 2)
 assert.equal(byTest(demo.prompts, 'prompt-change-card').length, 1)
 assert.equal(byTest(demo.settings, 'slack-configured').length, 1)
 assert.equal(byTest(demo.team, 'team-note').length, 1, 'the Team tab says the data is self-reported')
@@ -49,7 +72,7 @@ assert.ok(byTest(demo.board, 'sources')[0].children.some((a) => a?.props?.href =
 {
   const dsrc = demoSource()
   const page2 = () => expand(h(HarnessRsi, { src: dsrc, demo: true }))
-  let tree = await __settle(page2, true)
+  let tree = await tabTo(page2, await __settle(page2, true), 'board')
   const fresh = proposals.find((p) => !p.decision)
   const card = byTest(tree, 'proposal-card').find((c) => c.props['data-id'] === fresh.id)
   const doBtn = all([card]).find((n) => n.props['data-decision'] === 'do')
@@ -75,7 +98,10 @@ const none = { proposals: [], signals: [], changes: [], settings: { command_set:
   schedule: { schedule: { round_enabled: false, regress_enabled: false, score_enabled: false, weekday: 0, hour: 9, kirocrew_dir: '' }, runs: [] },
   dispatch: { auto_dispatch: false, repos: [], daily_cap: 2 }, github: null, round: null, runs: [], outcomes: [] }
 globalThis.__api = { get: async (p) => { reads.push(p); return none }, post: async () => ({ ok: true }) }
-const live = await __settle(page, true)
+const liveHome = await __settle(page, true)
+assert.ok(byTest(liveHome, 'setup-step').every((n) => n.props['data-ok'] !== 'true'), 'an empty backend has no step done')
+assert.ok(reads.includes('/api/apps/harness-rsi/schedule'))
+const live = await tabTo(page, liveHome, 'board')
 assert.equal(byTest(live, 'demo-note').length, 0)
 assert.equal(byTest(live, 'proposal-card').length, 0)
 assert.equal(byTest(live, 'empty-state').length, 1)
@@ -85,7 +111,7 @@ assert.ok(reads.includes('/api/apps/harness-rsi/team'))
 assert.ok(reads.includes('/api/apps/harness-rsi/proposals'))
 // A failing backend is an error notice, not a blank page or a silent fallback to fixtures.
 globalThis.__api = { get: async () => { throw new Error('502 Bad Gateway') }, post: async () => ({}) }
-const broken = await __settle(page, true)
+const broken = await tabTo(page, await __settle(page, true), 'board')
 assert.equal(byTest(broken, 'load-error').length, 1)
 assert.equal(byTest(broken, 'proposal-card').length, 0)
 
@@ -100,6 +126,8 @@ const src = demoSource()
 collect([proposals, signals, outcomes, promptChange, team, await src.settings(), await src.dispatchConf(), await src.schedule()])
 const dataByLength = [...data].filter((x) => x.length > 1).sort((a, b) => b.length - a.length)
 const ATTRS = ['aria-label', 'alt', 'placeholder', 'title']
+// Text in <code> (routes, script and metric names) is an identifier, not prose.
+const noCode = (ns) => ns.filter((n) => !(n && n.type === 'code')).map((n) => (n && typeof n === 'object' ? { ...n, children: noCode(n.children) } : n))
 const shown = (tree) => all(tree).flatMap((n) => [...n.children.filter((c) => typeof c === 'string' || typeof c === 'number').map(String),
   ...ATTRS.map((a) => n.props[a]).filter((x) => typeof x === 'string')])
 // Innermost first, since a table string can hold another one ({head} is a translated verdict).
@@ -110,7 +138,7 @@ const strip = (s) => dataByLength.reduce((acc, d) => acc.split(d).join(''), s)
 TABLE.qa = Object.fromEntries(Object.entries(TABLE.en).map(([k, v]) => [k, v.split(',').map((x) => `«${x}»`).join(',')]))
 for (const lang of ['qa', 'en', 'zh']) {
   setLang(lang)
-  const trees = await everyTab(() => expand(h(HarnessRsi, { src, demo: true })))
+  const trees = await everyTab(() => noCode(expand(h(HarnessRsi, { src, demo: true }))))
   for (const [tab, tree] of Object.entries(trees)) {
     for (const s of shown(tree)) {
       const rest = strip(lang === 'qa' ? unmark(s) : s)
@@ -189,11 +217,12 @@ assert.equal(TABLE.zh.days.split(',').length, 7)
   assert.equal(byTest(plain, 'demo-note').length, 0)
   globalThis.location = { search: '?demo=1' }
   globalThis.__api = noApi
-  const old = await __settle(page, true)
-  assert.equal(byTest(old, 'ux-v2').length, 0)
+  const oldHome = await __settle(page, true)
+  assert.equal(byTest(oldHome, 'ux-v2').length, 0)
+  assert.equal(byTest(oldHome, 'home-status').length, 1)
+  const old = await tabTo(page, oldHome, 'board')
   assert.equal(byTest(old, 'proposal-card').length, proposals.length)
-  // Every v2 word is in the table too. Text in <code> (routes, script and metric names) is an identifier, not prose.
-  const noCode = (ns) => ns.filter((n) => !(n && n.type === 'code')).map((n) => (n && typeof n === 'object' ? { ...n, children: noCode(n.children) } : n))
+  // Every v2 word is in the table too.
   for (const lang of ['qa', 'en', 'zh']) {
     setLang(lang)
     const vsrc = demoSource()
@@ -209,5 +238,25 @@ assert.equal(TABLE.zh.days.split(',').length, 7)
     }
   }
   setLang('en')
+}
+// (4) Home on live states: next round, last round, cost, and each step's real state.
+{
+  setLang('en')
+  const conf = { round_enabled: true, regress_enabled: false, score_enabled: true, weekday: 0, hour: 9, kirocrew_dir: '/kc' }
+  assert.equal(nextLine({ schedule: conf, next_round_at: null }), 'Next round: none, the weekly round is off. Turn it on in Settings.')
+  assert.equal(nextLine({ schedule: conf, next_round_at: '2026-10-05T09:00:00+00:00', read_at: '2026-10-05T09:30:00+00:00' }), 'Next round: due now; the next hourly check starts it.')
+  assert.match(nextLine({ schedule: conf, next_round_at: '2026-10-12T09:00:00+00:00', read_at: '2026-10-05T09:30:00+00:00' }), /^Next round: .+ \(the first hourly check after it starts it\)\.$/)
+  assert.equal(roundCost(null), 'Time and cost: unknown until a round finishes.')
+  assert.equal(roundCost({ n: 3, avg_duration_s: 5400, avg_cost: 1.25 }), 'Last 3 round(s) took 1 h 30 min on average; cost: 1.25 credits.')
+  assert.equal(lastRound(null, [{ kind: 'regress', end: 'x' }]), null)
+  assert.deepEqual(lastRound(null, [{ kind: 'regress' }, { kind: 'manual_round', end: 'e', signals: 4, cards: 3, error: '' }]),
+    { n: null, s: 4, p: 3, at: 'e', e: '', route: '/schedule' })
+  const steps = checklist({ settings: { command_set: true, channels: ['C1'], window_days: 7 }, sched: { schedule: conf, next_round_at: null },
+    job: { finished_at: 5, error: 'github: OSError', rows: null }, disp: { trust_dispatched: true },
+    round: { notes: ['sessions: OSError'] }, signals: [{ source: 'session:owner' }] })
+  assert.deepEqual(steps.map((x) => [x.key, x.ok]), [['slack', true], ['github', false], ['chats', false], ['schedule', true], ['trust', null]])
+  assert.match(steps[1].text, /^GitHub: failed at .+ \(github: OSError\)$/)
+  assert.equal(steps[2].text, 'The last round could not read your chats (sessions: OSError).')
+  assert.match(steps[4].text, /^Risk: a trusted chat runs tools without asking you/)
 }
 console.log('page ok')

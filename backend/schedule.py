@@ -2,6 +2,8 @@
 
 The hourly app cron posts ``/schedule/tick``; :func:`tick` starts what is on and due. Switches
 live in the vault (only the owner-only ``POST /schedule`` writes them); runs in ``schedule-runs.jsonl``.
+A row carries ``duration_s`` and ``cost`` (credits; None while the crew does not report them);
+a manual round (``POST /round/run``) is kept as ``manual_round``, which the weekly rule does not count.
 Out goes one note per round, one critical note per regression, one note when regression exams could
 not run; no Slack post, PR or merge.
 ``score_enabled`` lets the tick start the PR scoring job (``backend.autoscore``, via ``routes``).
@@ -51,11 +53,30 @@ def runs(limit=5, kind=None):
     return [r for r in store._jsonl(RUNS)[::-1] if isinstance(r, dict) and kind in (None, r.get("kind"))][:limit]
 
 
-def record(kind, started, end, **row):
+def record(kind, started, end, cost=None, **row):
+    """Append one run: its start, end, ``duration_s`` and ``cost`` in credits (None: not measured)."""
     (path := store.data_dir() / RUNS).parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as fh:
         fh.write(json.dumps({"kind": kind, "start": started.isoformat(timespec="seconds"),
-                             "end": end.isoformat(timespec="seconds"), "cost": None, **row}) + "\n")
+                             "end": end.isoformat(timespec="seconds"), "duration_s": max(0, round((end - started).total_seconds())),
+                             "cost": cost, **row}) + "\n")
+
+
+ROUND_KINDS = ("round", "manual_round")
+
+
+def round_stats(n=3):
+    """The average of the newest ``n`` rounds that ended without an error, scheduled or manual.
+
+    ``avg_cost`` is None unless every one of them carries a cost; ``from``/``to`` bound the rounds used."""
+    done = [r for r in store._jsonl(RUNS)[::-1] if isinstance(r, dict) and r.get("kind") in ROUND_KINDS and not r.get("error")][:n]
+    secs = [r["duration_s"] if isinstance(r.get("duration_s"), (int, float)) else
+            (dt.datetime.fromisoformat(r["end"]) - dt.datetime.fromisoformat(r["start"])).total_seconds() for r in done]
+    costs = [r.get("cost") for r in done]
+    known = bool(done) and all(isinstance(c, (int, float)) and not isinstance(c, bool) for c in costs)
+    return {"n": len(done), "avg_duration_s": round(sum(secs) / len(secs)) if secs else None,
+            "avg_cost": round(sum(costs) / len(costs), 2) if known else None,
+            "from": done[-1]["start"] if done else None, "to": done[0]["end"] if done else None}
 
 
 def _last_start(kind):
@@ -70,6 +91,22 @@ def round_due(conf, now, busy):
     start = _last_start("round")
     return ("off" if not conf["round_enabled"] else "busy" if busy else "done this week" if start and start >= slot
             else "ran under 6 days ago" if start and now - start < dt.timedelta(days=6) else "")
+
+
+def next_round_at(conf, now):
+    """When :func:`round_due` first stops saying why not: the first hourly tick at or after this starts a round.
+
+    None while the round switch is off. ``now`` itself when a round is due; a running job only delays it."""
+    if not conf["round_enabled"]:
+        return None
+    slot = (now - dt.timedelta(days=(now.weekday() - conf["weekday"]) % 7)).replace(
+        hour=conf["hour"], minute=0, second=0, microsecond=0)
+    slot -= dt.timedelta(days=7 if slot > now else 0)
+    start = _last_start("round")
+    for s in (slot, slot + dt.timedelta(days=7)):
+        if start and start >= s:
+            continue
+        return max(s, now, start + dt.timedelta(days=6) if start else now).isoformat(timespec="seconds")
 
 
 def regress_due(conf, now):

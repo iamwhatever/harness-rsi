@@ -111,12 +111,13 @@ find(sform, (x) => x.type === 'button')[0].props.onClick()
 assert.deepEqual(edits, [{ ...sched.schedule, round_enabled: true }, { ...sched.schedule, weekday: 3 }, { ...sched.schedule, hour: 7 },
   { ...sched.schedule, kirocrew_dir: '/kc' }, 'save'])
 assert.match(text(sform[0]), /nothing posts to Slack, opens a PR or merges/)
-assert.equal(text(expand(ui.Runs({ runs: [] }))[0]), 'No scheduled runs yet')
+assert.equal(text(expand(ui.Runs({ runs: [] }))[0]), 'No scheduled runs yetNext: run a round below, or turn on the weekly round in Settings.')
 const runs = [{ kind: 'regress', start: '2026-10-05T09:05:00+00:00', end: '2026-10-05T09:40:00+00:00', sha: 'f00dfeed1234', regressions: 2, error: '' },
-  { kind: 'round', start: '2026-10-05T09:05:00+00:00', end: '2026-10-05T10:05:00+00:00', signals: 12, cards: 3, error: '' }]
+  { kind: 'round', start: '2026-10-05T09:05:00+00:00', end: '2026-10-05T10:05:00+00:00', signals: 12, cards: 3, error: '' },
+  { kind: 'manual_round', start: '2026-10-06T09:05:00+00:00', end: '2026-10-06T10:05:00+00:00', signals: 4, cards: 3, error: '' }]
 const runRows = find(expand(ui.Runs({ runs })), (x) => x.props['data-testid'] === 'run-row')
-assert.deepEqual(runRows.map((r) => text(r.children[0])), ['Daily regression', 'Weekly round'])
-assert.deepEqual(runRows.map((r) => text(r.children[3])), ['2 regression(s) at f00dfee', '3 cards from 12 signals'])
+assert.deepEqual(runRows.map((r) => text(r.children[0])), ['Daily regression', 'Weekly round', 'Manual round'])
+assert.deepEqual(runRows.map((r) => text(r.children[3])), ['2 regression(s) at f00dfee', '3 cards from 12 signals', '3 cards from 4 signals'])
 assert.equal(ui.runResult({ kind: 'round', error: 'only 2 proposals' }), 'Failed: only 2 proposals')
 
 const calls = []
