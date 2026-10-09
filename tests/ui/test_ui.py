@@ -40,7 +40,7 @@ def test_manifest_is_opt_in_with_no_automatic_actions():
 
 def test_fake_data_is_a_copy_of_the_fixtures():
     lines = (ROOT / "ui" / "fake-data.mjs").read_text(encoding="utf-8").splitlines()
-    for name in ("proposals", "signals", "outcomes", "team"):
+    for name in ("proposals", "signals", "outcomes", "team", "report"):
         line = next(x for x in lines if x.startswith(f"export const {name} = "))
         assert json.loads(line.split(" = ", 1)[1]) == load(f"fixtures/{name}.json")
 
@@ -80,7 +80,7 @@ def test_work_tab_rows_steps_ci_and_flags(tmp_path):
 
 def test_no_motion_of_our_own():
     """Motion comes only from host components, which honour prefers-reduced-motion."""
-    for f in ("index.mjs", "v2.mjs", "home.mjs", "work.mjs"):
+    for f in ("index.mjs", "v2.mjs", "home.mjs", "work.mjs", "srcb.mjs"):
         src = (ROOT / "ui" / f).read_text(encoding="utf-8")
         assert not any(w in src for w in ("animate-", "transition", "@keyframes", "animation")), f
 

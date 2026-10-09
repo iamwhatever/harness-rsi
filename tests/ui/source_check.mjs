@@ -228,4 +228,28 @@ assert.equal(text(res({ result: 'not_do' })), 'Not started: decide Do first.')
 assert.equal(res({ result: 'error', reason: 'boom' }).props.role, 'alert')
 assert.equal(text(res({ result: 'error', reason: 'boom' })), 'Not started: boom')
 assert.equal(ui.DispatchResult({ result: undefined }), null)
+// The web side: GET /report and /topics, the owner's Make button and Save; form strings split as the backend reads them.
+{
+  const { parseTopics, topicsForm, reportJobText, meaning } = await import('./ui/srcb.mjs')
+  const calls = []
+  const job = { running: true, started_at: 1, finished_at: null, error: '' }
+  const tconf = { topics: ['coding agent', 'MCP'], sites: ['example.com'], x_handles: ['example'] }
+  const wapi = { get: async (p) => { calls.push(['get', p]); return p.endsWith('/report') ? { ok: true, report: null, job } : { ok: true, topics: tconf } },
+    post: async (p, b) => { calls.push(['post', p, b]); return p.endsWith('/report/make') ? { ok: true, job } : { ok: true, topics: b } } }
+  const ws = ui.backendSource(wapi)
+  assert.deepEqual(await ws.report(), { report: null, job })
+  assert.deepEqual(await ws.makeReport(), { job })
+  assert.deepEqual(await ws.topics(), tconf)
+  const form = topicsForm(tconf)
+  assert.deepEqual(form, { topics: 'coding agent, MCP', sites: 'example.com', x_handles: '@example' })
+  assert.deepEqual(parseTopics({ ...form, topics: 'coding agent,\nagent harness', x_handles: '@a b' }),
+    { topics: ['coding agent', 'agent harness'], sites: ['example.com'], x_handles: ['a', 'b'] })
+  await ws.saveTopics(parseTopics(form))
+  assert.deepEqual(calls, [['get', '/api/apps/harness-rsi/report'], ['post', '/api/apps/harness-rsi/report/make', {}],
+    ['get', '/api/apps/harness-rsi/topics'], ['post', '/api/apps/harness-rsi/topics', tconf]])
+  assert.match(reportJobText(job), /^Making since /)
+  assert.equal(reportJobText({ ...job, running: false, finished_at: 2, error: 'trending: OSError' }), 'Made, with a note: trending: OSError')
+  assert.equal(reportJobText(null), '')
+  assert.equal(meaning({ card: null }), 'For us: no card yet; the next round weighs it.')
+}
 console.log('source ok')

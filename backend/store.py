@@ -53,9 +53,14 @@ def read_signals():
     return [r for r in _jsonl("signals.jsonl") if valid("signal", r)]
 
 
+def web_rank(row):
+    """0 for a web page the trend scout read, 1 for a rising repo (``trend:github:``), 2 for everything else."""
+    return 0 if row["layer"] == "external" and not row["source"].startswith("trend:github:") else 1 if row["layer"] == "external" else 2
+
+
 def by_heat(rows):
-    """Primaries first, then most people, then most mentions."""
-    return sorted(rows, key=lambda r: (bool(r["dedup_of"]), -r["mentions"]["people"], -r["mentions"]["count"]))
+    """Primaries first; among them web sources first (``web_rank``), then most people, then most mentions."""
+    return sorted(rows, key=lambda r: (bool(r["dedup_of"]), web_rank(r), -r["mentions"]["people"], -r["mentions"]["count"]))
 
 
 def read_decisions():

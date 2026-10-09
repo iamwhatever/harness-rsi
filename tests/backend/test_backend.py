@@ -60,7 +60,12 @@ def test_reads_are_schema_valid_and_signals_hottest_first(data):
     assert all(store.valid("proposal", p) for p in prop["proposals"])
     primary = [r for r in sig["signals"] if not r["dedup_of"]]
     assert sig["signals"][: len(primary)] == primary
-    assert [r["mentions"]["people"] for r in primary] == sorted((r["mentions"]["people"] for r in primary), reverse=True)
+    # web sources first (scout pages, then rising repos), each group hottest first
+    assert [store.web_rank(r) for r in primary] == sorted(store.web_rank(r) for r in primary)
+    assert primary[0]["layer"] == "external"
+    for rank in (0, 1, 2):
+        group = [r["mentions"]["people"] for r in primary if store.web_rank(r) == rank]
+        assert group == sorted(group, reverse=True)
 
 
 def test_decision_append_is_idempotent_per_click(data):
@@ -122,7 +127,7 @@ def test_refresh_merges_slack_now_and_github_when_the_slow_job_ends(data, job, m
     done = asyncio.run(scenario())
     assert calls == [1] and done["running"] is False and done["rows"] == 2 and done["error"] == ""
     rows = [json.loads(x) for x in (data / "signals.jsonl").read_text().splitlines()]
-    assert all(store.valid("signal", r) for r in rows) and len({r["id"] for r in rows}) == len(rows) == 13
+    assert all(store.valid("signal", r) for r in rows) and len({r["id"] for r in rows}) == len(rows) == len(SIGNALS) + 3
     by_link = {r["links"][0]: r for r in rows}
     head = by_link["https://example.com/s/1"]
     assert head["id"] not in {r["id"] for r in SIGNALS} and head["dedup_of"] is None  # clashing id replaced
@@ -300,5 +305,5 @@ def test_disabled_app_registers_nothing(tmp_path, monkeypatch):
                    ("POST", "/schedule/tick"), ("GET", "/outcomes"), ("POST", "/outcomes/link"),
                    ("POST", "/score/run"), ("GET", "/dispatch"), ("POST", "/dispatch"),
                    ("POST", "/dispatch/start"), ("GET", "/prompt-changes"), ("POST", "/prompt-changes/decide"),
-                   ("GET", "/team")]
+                   ("GET", "/team"), ("GET", "/report"), ("POST", "/report/make"), ("GET", "/topics"), ("POST", "/topics")]
     assert not (tmp_path / "d").exists()

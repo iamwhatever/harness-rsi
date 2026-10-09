@@ -51,6 +51,8 @@ def env(tmp_path, monkeypatch):
     assert github and slack
     gate, seen, crew = threading.Event(), [], FakeCrew()
     gate.set()
+    trend = {**next(s for s in SIGNALS if s["source"].startswith("trend:github:")), "id": "sig_20260101_0901"}
+    monkeypatch.setattr(routes.report, "trending_rows", lambda: (seen.append("trending"), ([trend], ""))[1])
     monkeypatch.setattr(routes, "github_rows", lambda: (seen.append("github"), gate.wait(10), (github, ""))[2])
     monkeypatch.setattr(settings, "read", lambda: {**settings.DEFAULTS, "command": SECRET})  # as the vault answers
     monkeypatch.setattr(routes.adapters.slack, "collect", lambda conf: seen.append(conf["command"]) or slack)
@@ -75,7 +77,7 @@ def test_round_runs_with_the_apps_own_collectors(env):
     assert status == 202 and body["round"]["running"] is True and body["round"]["round"] == 1
     done = run()[1]
     assert done["running"] is False and done["error"] == "" and done["counts"]["proposals"] >= 3
-    assert env["seen"] == ["github", SECRET, "sessions", "prior"]  # Slack read with the vault's command, in-process
+    assert env["seen"] == ["trending", "github", SECRET, "sessions", "prior"]  # Slack read with the vault's command, in-process
     names = [n for n, _ in env["crew"].calls]
     assert "rsi-session-scanner" in names and "rsi-trend-scout" in names
     rows = [json.loads(x) for x in (env["data"] / "signals.jsonl").read_text().splitlines()]
@@ -83,6 +85,9 @@ def test_round_runs_with_the_apps_own_collectors(env):
     assert "session:owner" in {r["source"] for r in rows}  # the deterministic collector, not only the scanner
     assert done["notes"] == [f"exams: not dry-run ({round_job.EXAM_ENV} unset, no KiroCrew clone in the schedule)"]
     assert round_job.next_round() == 2
+    report = json.loads(next((env["data"] / "reports").glob("*.json")).read_text())  # the round wrote its catch-up report
+    assert report["how"] == "round" and report["round"] == 1 and report["counts"]["repos"] == 1
+    assert (env["data"] / "reports" / f"{report['date']}.md").read_text().startswith("# Industry catch-up, ")
 
 
 def test_round_is_single_flight(env):

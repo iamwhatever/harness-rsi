@@ -44,6 +44,14 @@ Closing the loop (outcome ledger):
 - `python3 crew/propose.py --ab AB.json` (the meta step, after a `crew/ab.py` run) hands the proposer agent the ledger's counts and that A/B's miss reasons, never an exam, and saves its ONE change for ONE agent to `$HARNESS_RSI_DATA/prompt_changes/<id>.json` as pending; `--attach ID --ab AB2.json` puts the A/B of that change on it. Needs you shows it as a Switch to B item (A vs B per metric, verdict, when and how the A/B ran, the diff), and Home's Details keeps the raw A/B table; only the owner's Switch to B applies it, which writes the new version.
 - Back-fill: `python -m backend.autoscore --kirocrew KC --pr N [--card prop_x]` scores one PR now; a PR with no runnable exam or no card says so in `note`.
 
+The web side (the main source):
+
+- Topics, trusted sites and optional X handles live in the gateway vault (`backend/topics.py`; defaults `coding agent`, `MCP`, `agent harness`); only the owner's Settings section (`POST /topics`) writes them. No login or credential is used: a page that needs one is recorded as not reachable.
+- `python -m adapters.trending [--topic T ...]` finds fast-rising repos for the topics through the GitHub search API (created in the last 30 days, ranked by stars per day), then their recent releases and most-discussed new issues: deterministic `layer: external` rows with source `trend:github:<owner/repo>`, names, counts and links only. Every round reads it first.
+- The trend scout (`crew/agents/prompts/rsi-trend-scout.md`) is told the topics, sites and handles each round, searches each topic and each topic on each site, and replies with links and a one-line summary per finding (page text is untrusted data and never copied); its `NOT REACHABLE:` line lands in `$HARNESS_RSI_DATA/web_reach.json`.
+- Signals rank web pages first, then rising repos, then everything else (`store.by_heat`).
+- Weekly catch-up report (`backend/report.py`): after every round, and on Home's Make catch-up report button (`POST /report/make`, which first reads rising repos), `$HARNESS_RSI_DATA/reports/<date>.md` gets the top 5 trends, new repos and releases, what each top trend may mean for us (the card that picks it up, or none yet), pages not reachable and every link. `GET /report` serves the newest with a `.json` twin; Home shows it with its source and time, plus a Slack draft to copy. Nothing posts it.
+
 Improving the crew's own prompts:
 
 - Each crew prompt has a version id (`crew/prompts.py`: `v` + 10 hex digits of the text's sha256). A round writes the versions it ran to `$HARNESS_RSI_DATA/prompt_versions.json` and prints them. A prompt change the owner applied lives in `$HARNESS_RSI_DATA/prompts/<agent>.md` and wins over the repo copy; each apply appends to `prompt_versions.jsonl`.

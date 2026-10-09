@@ -39,6 +39,16 @@ def seal_keys(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def no_gh_trending(monkeypatch):
+    """``adapters.trending`` reads GitHub through ``gh``; a test that wants rows passes its own fetch."""
+    from adapters import trending
+
+    def off(path, params=None):
+        raise OSError("gh is off in tests")
+    monkeypatch.setattr(trending, "gh_fetch", off)
+
+
+@pytest.fixture(autouse=True)
 def no_gh_checks(monkeypatch):
     """``GET /outcomes`` reads PR checks through ``gh``; a test that wants them passes its own runner."""
     monkeypatch.setattr(outcome_checks, "RUN", lambda argv, **kw: subprocess.CompletedProcess(argv, 1, "", "gh is off in tests"))

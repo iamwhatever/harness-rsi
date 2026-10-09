@@ -2,7 +2,8 @@
 vault exactly as ``POST /refresh`` does (a bare CLI cannot).
 
 ``start`` runs ``crew/run_round.run_round`` in a worker thread, at most one at a time;
-``view`` is what ``GET /round/status`` shows. Agents and the mock saver come from the
+``view`` is what ``GET /round/status`` shows; a round that ends well writes its
+catch-up report (``backend.report``), and the trend scout is told the owner's topics (``backend.topics``). Agents and the mock saver come from the
 crew's own wiring; the collectors are passed in by the caller.
 """
 
@@ -19,7 +20,7 @@ try:  # see settings.py: a subpackage in the gateway, top-level in tests and the
 except ImportError:
     from judge import seal
 
-from . import schedule, store
+from . import schedule, store, topics
 
 EXAM_ENV = "HARNESS_RSI_EXAM_WORKDIR"
 STATE = {"task": None, "running": False, "round": None, "started_at": None, "finished_at": None,
@@ -89,13 +90,19 @@ def _run(rnd, sources):
                             day=dt.date.today().strftime("%Y%m%d"),
                             check_exam=crew().validate_checker(Path(workdir)) if workdir else None,
                             prior=make_prior(),
-                            facts=crew().setter_facts(Path(workdir), data / "exams") if workdir else None)
+                            facts=crew().setter_facts(Path(workdir), data / "exams") if workdir else None,
+                            scout_brief=topics.brief(topics.read()))
 
 
 async def _job(rnd, sources):
     try:
         out = await asyncio.to_thread(_run, rnd, sources)
         STATE.update(counts={k: len(v) for k, v in out.items()})
+        from . import report  # imported here: report reads STATE
+        try:
+            await asyncio.to_thread(report.after_round, rnd)
+        except Exception as exc:  # noqa: BLE001 - a report failure must not fail the round
+            STATE["notes"].append(f"report: {type(exc).__name__}")
     except Exception as exc:  # noqa: BLE001 - the job must always report and release
         is_round = isinstance(exc, crew().RoundError)
         STATE.update(error=str(exc) if is_round else type(exc).__name__)  # other text may quote a path
