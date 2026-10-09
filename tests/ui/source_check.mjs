@@ -26,13 +26,13 @@ const api = (slackOn) => ({
     if (p.endsWith('/settings')) return { settings: conf }; if (p === '/api/apps/harness-rsi/signals') return { signals }
     throw new Error(`unexpected read ${p}`) },
   post: async (p, b) => { sent.push([p, b]); return p.endsWith('/refresh') ? { ok: true, total: 3, added: 1,
-    errors: slackOn ? [] : ['slack: off (no Slack MCP command set)'] } : p.endsWith('/settings') ? { settings: shown(b) }
+    errors: slackOn ? [] : ['slack: off (no Slack connector set)'] } : p.endsWith('/settings') ? { settings: shown(b) }
     : p.endsWith('/round/run') ? { ok: true, round: roundJob } : { ok: true } },
 })
 assert.deepEqual(await ui.backendSource(api(true)).load(), { proposals, signals, images: {} })
 await ui.backendSource(api(true)).decide('prop_bg_tasks', 'do')
 assert.deepEqual((await ui.backendSource(api(true)).refresh()).errors, [])
-assert.deepEqual((await ui.backendSource(api(false)).refresh()).errors, ['slack: off (no Slack MCP command set)'])
+assert.deepEqual((await ui.backendSource(api(false)).refresh()).errors, ['slack: off (no Slack connector set)'])
 assert.deepEqual(await ui.backendSource(api(true)).settings(), conf)
 const form = ui.toForm(conf)
 assert.equal(form.command, '')
@@ -44,15 +44,47 @@ assert.equal(ui.slackNote(saved), 'Slack: on, reading 2 channel(s) over 14 days'
 const changed = []
 const panel = expand(ui.SettingsForm({ form, note: '', onSave: () => changed.push('save'), onChange: (f) => changed.push(f) }))
 assert.match(text(find(panel, (n) => n.props['data-testid'] === 'slack-note')[0]), /^Slack collection is off/)
-assert.equal(text(find(panel, (n) => n.props['data-testid'] === 'slack-configured')[0]), 'Slack MCP command configured: no')
+assert.equal(text(find(panel, (n) => n.props['data-testid'] === 'slack-configured')[0]), 'Slack connector set: no')
 const panelOn = expand(ui.SettingsForm({ form: ui.toForm(saved), note: '', onSave() {}, onChange() {} }))
-assert.equal(text(find(panelOn, (n) => n.props['data-testid'] === 'slack-configured')[0]), 'Slack MCP command configured: yes')
+assert.equal(text(find(panelOn, (n) => n.props['data-testid'] === 'slack-configured')[0]), 'Slack connector set: yes')
 assert.ok(!JSON.stringify(ui.toForm(saved)).includes('slack-mcp'))
-const inputs = find(panel, (n) => n.type === 'input')
+// The connector is a picker over the Slack MCP servers in mcp.json; typing a command is under Advanced.
+assert.equal(find(panel, (n) => n.props['data-testid'] === 'slack-pick-none').length, 1, 'no connector found says where to add one')
+const pick = find(panel, (n) => n.type === 'select')[0]
+assert.equal(pick.props.name, 'pick')
+assert.deepEqual(find([pick], (n) => n.type === 'option').map((n) => n.props.value), ['', ui.ADVANCED])
+assert.deepEqual(find(panel, (n) => n.type === 'input').map((n) => n.props.name), ['channels', 'window_days', 'workspace_url'])
+const adv = expand(ui.SettingsForm({ form: { ...form, pick: ui.ADVANCED }, note: '', onSave: () => changed.push('save'), onChange: (f) => changed.push(f) }))
+const inputs = find(adv, (n) => n.type === 'input')
 assert.deepEqual(inputs.map((n) => n.props.name), ['command', 'args', 'channels', 'window_days', 'workspace_url'])
 inputs[0].props.onChange('slack-mcp')
-find(panel, (n) => n.type === 'button')[0].props.onClick()
-assert.deepEqual(changed, [{ ...form, command: 'slack-mcp' }, 'save'])
+find(adv, (n) => n.type === 'button')[0].props.onClick()
+assert.deepEqual(changed, [{ ...form, pick: ui.ADVANCED, command: 'slack-mcp' }, 'save'])
+const found = { ...conf, command_set: true, server: 'team-slack', repos: [],
+  servers: [{ name: 'team-slack', source: 'workspace', usable: true }, { name: 'slack-shell', source: 'user', usable: false }] }
+const picked = expand(ui.SettingsForm({ form: ui.toForm(found), note: '', onSave() {}, onChange() {} }))
+assert.equal(text(find(picked, (n) => n.props['data-testid'] === 'slack-configured')[0]), 'Slack connector: team-slack')
+assert.deepEqual(find(picked, (n) => n.type === 'option').map((n) => [n.props.value, text(n)]),
+  [['', 'Keep the current one'], ['team-slack', 'team-slack (this workspace)'], [ui.ADVANCED, 'Advanced: type the command']])
+assert.match(text(find(picked, (n) => n.props['data-testid'] === 'slack-pick-unusable')[0]), /slack-shell/)
+assert.equal(find(picked, (n) => n.props['data-testid'] === 'slack-pick-none').length, 0)
+// A picked name is sent as `pick` (the backend copies its command and args); a typed command only under Advanced.
+assert.deepEqual(ui.parseSettings({ ...ui.toForm(found), pick: 'team-slack', command: 'ignored' }),
+  { pick: 'team-slack', channels: conf.channels, window_days: 14, workspace_url: '', repos: [] })
+assert.deepEqual(ui.parseSettings({ ...form, pick: ui.ADVANCED, command: 'x', args: '-a -b' }).args, ['-a', '-b'])
+// GitHub: the repo list, each with its last read.
+const ghConf = { ...conf, repos: ['o/one', 'o/two', 'o/three'], fetch: { 'o/one': { at: 1767603900, rows: 4, error: '' }, 'o/two': { at: 1767603900, rows: null, error: 'github: o/two: adapter exit 3' } } }
+const ghForm = ui.toForm(ghConf)
+assert.equal(ghForm.repos, 'o/one, o/two, o/three')
+assert.deepEqual(ui.parseSettings({ ...ghForm, repos: 'a/b,  c/d' }).repos, ['a/b', 'c/d'])
+const gh = expand(ui.GithubForm({ form: ghForm, note: '', onSave() {}, onChange() {} }))
+const ghRows = find(gh, (n) => n.props['data-testid'] === 'gh-repo')
+assert.deepEqual(ghRows.map((n) => n.props['data-repo']), ['o/one', 'o/two', 'o/three'])
+assert.match(text(ghRows[0]), /^o\/one4 issue\(s\) at /)
+assert.match(text(ghRows[1]), /failed at .*\(github: o\/two: adapter exit 3\)$/)
+assert.equal(text(ghRows[2]), 'o/threenot read yet')
+const ghOff = expand(ui.GithubForm({ form: ui.toForm({ ...conf, repos: [] }), note: '', onSave() {}, onChange() {} }))
+assert.equal(text(find(ghOff, (n) => n.props['data-testid'] === 'gh-off')[0]), 'No repo set: GitHub is not read.')
 assert.deepEqual(await ui.backendSource(api(true)).status(), { running: true })
 const job = { running: false, started_at: 1, finished_at: 2, rows: 5, error: '' }
 assert.equal(ui.jobText(null), '')

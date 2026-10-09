@@ -25,7 +25,9 @@ const schedule = { schedule: { round_enabled: false, regress_enabled: false, sco
   // GET /schedule's own answers: no next round while the weekly round is off; the last-3 average of good rounds.
   next_round_at: null, read_at: '2026-01-06T09:10:00+00:00',
   round_stats: { n: 2, avg_duration_s: 3300, avg_cost: null, from: '2025-12-29T09:05:00+00:00', to: '2026-01-05T10:05:00+00:00' } }
-const settings = { command_set: false, channels: ['C0FAKE00001'], window_days: 14, workspace_url: '' }
+// FAKE: one Slack connector found in mcp.json (by name only) and one repo with its last read.
+const settings = { command_set: false, server: '', channels: ['C0FAKE00001'], window_days: 14, workspace_url: '', repos: ['example-org/example-repo'],
+  servers: [{ name: 'example-slack-mcp', source: 'user', usable: true }], fetch: { 'example-org/example-repo': { at: 1767603900, rows: 3, error: '' } } }
 const dispatch = { auto_dispatch: false, repos: ['example-org/example-repo'], daily_cap: 2, trust_dispatched: false }
 /** The backendSource shape over the fixtures: every read answers fake rows, every write is kept in memory only. */
 export function demoSource() {

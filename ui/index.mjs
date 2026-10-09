@@ -49,17 +49,20 @@ export function backendSource(api) {
 }
 
 const words = (x) => String(x || '').split(/[\s,]+/).filter(Boolean)
-/** Form strings -> the POST /settings body; a blank command keeps the saved one (and its args). */
+/** The picker's choice that opens the hand-typed command and args. */
+export const ADVANCED = '__advanced'
+/** Form strings -> the POST /settings body. A connector name sends `pick` (the backend copies its command and args
+ *  from mcp.json); Advanced sends the typed command; a blank choice and a blank command keep the saved one. */
 export const parseSettings = (f) => {
-  const command = String(f.command || '').trim()
-  return { ...(command ? { command, args: words(f.args) } : {}), channels: words(f.channels),
-    window_days: Number(f.window_days), workspace_url: String(f.workspace_url || '').trim() }
+  const command = String(f.command || '').trim(), pick = String(f.pick || '')
+  const slack = pick && pick !== ADVANCED ? { pick } : command ? { command, args: words(f.args) } : {}
+  return { ...slack, channels: words(f.channels), window_days: Number(f.window_days), workspace_url: String(f.workspace_url || '').trim(),
+    ...(f.repos === undefined ? {} : { repos: words(f.repos) }) }
 }
-/** The backend shows only whether a command is set, so its inputs start blank. */
-export const toForm = (s) => ({ saved: s, command: '', args: '', channels: s.channels.join(', '),
-  window_days: String(s.window_days), workspace_url: s.workspace_url })
+/** The backend shows only whether a command is set and the connector's name, so the command inputs start blank. */
+export const toForm = (s) => ({ saved: s, pick: '', command: '', args: '', channels: s.channels.join(', '),
+  window_days: String(s.window_days), workspace_url: s.workspace_url, ...(Array.isArray(s.repos) ? { repos: s.repos.join(', ') } : {}) })
 export const slackNote = (s) => (s?.command_set ? t('slackOn', { n: s.channels.length, days: s.window_days }) : t('slackOff'))
-
 const LABEL = 'text-[11px] uppercase tracking-wide text-muted font-semibold mb-1'
 const MUTED = 'text-[13px] text-muted'
 const Saver = ({ onSave, note, label }) => h('div', { className: 'flex flex-wrap items-center gap-3 mt-2' },
@@ -72,13 +75,45 @@ const Table = ({ caption, cols, children, testId }) => h('div', { className: 'ov
 const TD = 'px-2 py-2 border-b border-border'
 const td = (...c) => h('td', { className: TD }, ...c)
 
-const FIELDS = ['command', 'args', 'channels', 'window_days', 'workspace_url']
-/** The Slack settings form: stateless, so the page owns the values. */
+const FIELDS = ['channels', 'window_days', 'workspace_url']
+const configured = (s) => (s.command_set && s.server ? t('srcA_slackUsing', { name: s.server }) : t(s.command_set ? 'slackSetYes' : 'slackSetNo'))
+/** The Slack settings form: stateless, so the page owns the values. The connector comes from a picker over
+ *  the Slack MCP servers already in mcp.json; typing a command is under Advanced. */
 export function SettingsForm({ form, onChange, onSave, note }) {
+  const servers = form.saved.servers || []
+  const usable = servers.filter((x) => x.usable), unusable = servers.filter((x) => !x.usable)
+  const set = (k) => (v) => onChange({ ...form, [k]: v })
+  const options = ['', ...usable.map((x) => x.name), ADVANCED]
+  const optionLabels = [t(form.saved.command_set ? 'srcA_pickKeep' : 'srcA_pickChoose'),
+    ...usable.map((x) => t(`srcA_from_${x.source}`, { name: x.name })), t('srcA_pickAdvanced')]
   return h(UI.SettingsSection, { title: t('slackTitle') },
-    h('div', { className: MUTED, 'data-testid': 'slack-configured' }, t(form.saved.command_set ? 'slackSetYes' : 'slackSetNo')),
+    h('div', { className: MUTED, 'data-testid': 'slack-configured' }, configured(form.saved)),
     h('div', { className: MUTED, 'data-testid': 'slack-note' }, slackNote(form.saved)),
-    FIELDS.map((k) => h(UI.SettingsInput, { key: k, name: k, label: t(`field_${k}`), value: form[k] ?? '', onChange: (v) => onChange({ ...form, [k]: v }) })),
+    h(UI.SettingsSelect, { name: 'pick', label: t('srcA_pickLabel'), value: form.pick || '', options, optionLabels, onChange: set('pick') }),
+    h('div', { className: MUTED, 'data-testid': 'slack-pick-help' }, t('srcA_pickHelp')),
+    usable.length ? null : h('div', { className: MUTED, 'data-testid': 'slack-pick-none' }, t('srcA_pickNone')),
+    unusable.length ? h('div', { className: MUTED, 'data-testid': 'slack-pick-unusable' }, t('srcA_pickUnusable', { names: unusable.map((x) => x.name).join(', ') })) : null,
+    form.pick === ADVANCED ? [
+      h('div', { key: 'adv', className: MUTED, 'data-testid': 'slack-advanced' }, t('srcA_advancedHelp')),
+      h(UI.SettingsInput, { key: 'command', name: 'command', label: t('field_command'), value: form.command ?? '', onChange: set('command') }),
+      h(UI.SettingsInput, { key: 'args', name: 'args', label: t('field_args'), value: form.args ?? '', onChange: set('args') })] : null,
+    FIELDS.map((k) => h(UI.SettingsInput, { key: k, name: k, label: t(`field_${k}`), value: form[k] ?? '', onChange: set(k) })),
+    h(Saver, { onSave, note }))
+}
+
+/** One line for a repo's last GitHub read (GET /settings `fetch`). */
+export const repoState = (st) => (!st ? t('srcA_ghNever') : st.error ? t('srcA_ghFailed', { at: at(st.at * 1000), e: st.error })
+  : t('srcA_ghRead', { n: st.rows, at: at(st.at * 1000) }))
+/** The GitHub repos a refresh and a round read, each with its last read; saved with the Slack settings. */
+export function GithubForm({ form, onChange, onSave, note }) {
+  const saved = form.saved.repos || [], fetch = form.saved.fetch || {}
+  return h(UI.SettingsSection, { title: t('srcA_ghTitle') },
+    h('div', { className: MUTED }, t('srcA_ghIntro')),
+    saved.length ? h('ul', { className: 'flex flex-col gap-1 text-[13px]', 'data-testid': 'gh-repos' },
+      saved.map((r) => h('li', { key: r, 'data-testid': 'gh-repo', 'data-repo': r, className: 'flex flex-wrap gap-x-2 min-w-0' },
+        h('code', { className: 'break-all' }, r), h('span', { className: 'text-muted' }, repoState(fetch[r])))))
+      : h('div', { className: MUTED, 'data-testid': 'gh-off' }, t('srcA_ghOff')),
+    h(UI.SettingsInput, { name: 'repos', label: t('srcA_ghRepos'), value: form.repos ?? '', onChange: (v) => onChange({ ...form, repos: v }) }),
     h(Saver, { onSave, note }))
 }
 
@@ -332,6 +367,7 @@ export function HarnessRsi({ src, demo = false }) {
     needs: () => [h(Needs, { key: 'needs', proposals: data.proposals, signals: data.signals, out, disp, changes, team, sched, readAt, results, onDecide: decide, onDispatch: dispatchCards, onPrompt: decidePrompt })],
     work: () => [h(Work, { key: 'w', proposals: data.proposals, out, team, onScore: score, scoreBusy: scoreRunning(out), scoreLine: scoreJobText(out?.score) })],
     settings: () => [form ? h(SettingsForm, { key: 'f', form, note: formNote, onSave: save, onChange: (f) => setForm([f, '']) }) : lines(formNote),
+      form && Array.isArray(form.saved.repos) ? h(GithubForm, { key: 'g', form, note: formNote, onSave: save, onChange: (f) => setForm([f, '']) }) : null,
       sched ? h(ScheduleForm, { key: 's', conf: sched.schedule, note: schedNote, onSave: saveSched, onChange: (c) => setSched([{ ...sched, schedule: c }, '']) }) : null,
       disp ? h(DispatchForm, { key: 'd', conf: disp, note: dispNote, onSave: saveDisp, onChange: (c) => setDisp([c, '']) }) : null],
   }

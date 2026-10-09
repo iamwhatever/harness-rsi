@@ -4,8 +4,9 @@
 server (``adapters.slack``; off while no command is set) and merges those rows at once.
 It also starts ``python -m adapters.github_issues`` as a
 one-shot job (at most one at a time; it takes minutes) whose rows merge when it exits;
-``GET /refresh/status`` reports that job. ``GET``/``POST /settings`` show and change the
-Slack settings (``backend.settings``). ``POST /round/run`` runs one design-crew round
+``GET /refresh/status`` reports that job; the job reads each repo in the settings' ``repos`` list
+and records each one's last read. ``GET``/``POST /settings`` show and change the Slack and GitHub
+settings (``backend.settings``), with the Slack connectors found in ``mcp.json`` by name. ``POST /round/run`` runs one design-crew round
 (``backend.round_job``) with these same Slack and GitHub sources plus the owner's sessions; ``GET /round/status``
 reports it and, when it ends, writes a ``manual_round`` run row. ``GET /schedule`` also
 answers ``next_round_at`` and ``round_stats`` (the last-3 average). ``/schedule`` and ``/schedule/tick``: the owner's opt-in weekly round and daily
@@ -34,9 +35,11 @@ try:  # the gateway loads the backend as a subpackage of the app's own synthetic
     from .. import adapters
     from ..adapters import sessions as _sessions  # noqa: F401 - binds adapters.sessions
     from ..adapters import slack as _slack  # noqa: F401 - binds adapters.slack
+    from ..adapters.github_issues.adapter import distinct_ids
 except ImportError:  # tests and the CLI import ``backend`` as a top-level package
     import adapters.sessions
     import adapters.slack
+    from adapters.github_issues.adapter import distinct_ids
 
 from . import dispatch, ledger, outcome_checks, prompt_changes, round_job, schedule, settings, store, team
 from .ledger import seal
@@ -82,21 +85,42 @@ async def _body(request):
 
 
 def github_rows():
-    """Signal rows from the GitHub adapter, or ``([], error)``."""
+    """Signal rows from the GitHub adapter for every repo in the settings, or ``([], error)``.
+
+    Each repo is its own adapter run, so one failing repo keeps the others' rows, and each
+    repo's last read is kept for the Settings tab (``settings.record_fetch``).
+    """
+    rows, errors, taken = [], [], set()
+    repos = settings.read()["repos"]
+    if not repos:
+        return [], "github: off (no repo set)"
+    for repo in repos:
+        got, error = _github_repo(repo)
+        rows += distinct_ids(got, taken)
+        if error:
+            errors.append(error)
+        try:
+            settings.record_fetch(repo, time.time(), None if error else len(got), error)
+        except OSError:
+            pass  # the state line is for the page; the rows still count
+    return rows, "; ".join(errors)
+
+
+def _github_repo(repo):
     try:
-        r = subprocess.run([sys.executable, "-m", "adapters.github_issues"], cwd=store.ROOT,
+        r = subprocess.run([sys.executable, "-m", "adapters.github_issues", "--repo", repo], cwd=store.ROOT,
                            capture_output=True, text=True, timeout=GITHUB_TIMEOUT_S)
         rows = json.loads(r.stdout) if r.returncode == 0 else None
     except (OSError, subprocess.TimeoutExpired, ValueError) as exc:
-        return [], f"github: {type(exc).__name__}"
-    return (rows, "") if isinstance(rows, list) else ([], f"github: adapter exit {r.returncode}")
+        return [], f"github: {repo}: {type(exc).__name__}"
+    return (rows, "") if isinstance(rows, list) else ([], f"github: {repo}: adapter exit {r.returncode}")
 
 
 def slack_rows():
     """Signal rows from the Slack MCP, or ``([], note)``; a note also when collection is off."""
     conf = settings.read()
     if not conf["command"]:
-        return [], "slack: off (no Slack MCP command set)"
+        return [], "slack: off (no Slack connector set)"
     try:
         return adapters.slack.collect(conf), ""
     except Exception as exc:  # noqa: BLE001 - a Slack failure must not stop the GitHub refresh
@@ -117,7 +141,7 @@ def round_sources():
 
 
 async def _settings_get(request, ctx):
-    return web.json_response({"ok": True, "settings": settings.public(await asyncio.to_thread(settings.read))})
+    return web.json_response({"ok": True, "settings": await asyncio.to_thread(lambda: settings.view(settings.read()))})
 
 
 async def _save(request, mod, what, show):
@@ -138,7 +162,7 @@ async def _save(request, mod, what, show):
 
 
 async def _settings_post(request, ctx):
-    return await _save(request, settings, "settings", settings.public)
+    return await _save(request, settings, "settings", settings.view)
 
 
 async def _signals(request, ctx):

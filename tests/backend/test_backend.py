@@ -39,6 +39,7 @@ def call(handler, req=None):
 @pytest.fixture
 def data(tmp_path, monkeypatch):
     monkeypatch.setenv("HARNESS_RSI_DATA", str(tmp_path))
+    monkeypatch.setattr(settings, "mcp_files", lambda: [])  # never the real ~/.kiro/settings/mcp.json
     (tmp_path / "signals.jsonl").write_text("".join(json.dumps(r) + "\n" for r in SIGNALS) + "not json\n{}\n")
     (tmp_path / "proposals.json").write_text(json.dumps(PROPOSALS + [{"id": "bad"}]))
     return tmp_path
@@ -167,13 +168,13 @@ def test_refresh_works_with_slack_off(data, job, monkeypatch):
         return out
 
     out = asyncio.run(scenario())
-    assert out["ok"] and out["added"] == 0 and out["errors"] == ["slack: off (no Slack MCP command set)"]
+    assert out["ok"] and out["added"] == 0 and out["errors"] == ["slack: off (no Slack connector set)"]
 
 
 def test_settings_default_off_then_owner_saves_command_to_vault(data, monkeypatch):
     vault = FakeVault()
     monkeypatch.setattr(settings, "_vault", lambda: vault)
-    assert call(routes._settings_get)[1]["settings"] == settings.public(settings.DEFAULTS)
+    assert call(routes._settings_get)[1]["settings"] == {**settings.public(settings.DEFAULTS), "servers": [], "fetch": {}}
     assert call(routes._settings_get)[1]["settings"]["command_set"] is False
     assert settings.DEFAULTS["command"] == "" and settings.DEFAULTS["channels"] == ["C0AGA4Y4NP7"]
     new = {"command": "slack-mcp", "args": ["--read-only"], "channels": ["c0fake00003"], "window_days": 7}
@@ -186,7 +187,8 @@ def test_settings_default_off_then_owner_saves_command_to_vault(data, monkeypatc
     assert status == 200 and body["settings"]["channels"] == ["C0FAKE00003"] and body["settings"]["command_set"] is True
     shown = json.dumps([body, call(routes._settings_get)[1]])
     assert "slack-mcp" not in shown and "--read-only" not in shown  # yes/no only, never the value
-    assert json.loads(vault.saved[settings.VAULT_NAME]) == {"command": "slack-mcp", "args": ["--read-only"], "workspace_url": ""}
+    assert json.loads(vault.saved[settings.VAULT_NAME]) == {"command": "slack-mcp", "args": ["--read-only"], "workspace_url": "",
+                                                           "server": "", "repos": ["kirodotdev/KiroCrew"]}
     local = json.loads((data / settings.FILE).read_text())
     assert local == {"channels": ["C0FAKE00003"], "window_days": 7}  # the spawn target never sits in the data dir
     (data / settings.FILE).write_text(json.dumps({"command": "evil", "channels": ["C0FAKE00004"]}))
@@ -194,6 +196,84 @@ def test_settings_default_off_then_owner_saves_command_to_vault(data, monkeypatc
     assert got["command"] == "slack-mcp" and got["channels"] == ["C0FAKE00004"]
     assert call(routes._settings_post, Req({"window_days": 9}))[1]["settings"]["command_set"] is True  # kept
     assert json.loads(vault.saved[settings.VAULT_NAME])["command"] == "slack-mcp"
+
+
+def _mcp(path, servers):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"mcpServers": servers}))
+    return path
+
+
+def test_slack_picker_lists_connectors_by_name_and_copies_only_command_and_args(data, tmp_path, monkeypatch):
+    vault = FakeVault()
+    monkeypatch.setattr(settings, "_vault", lambda: vault)
+    user = _mcp(tmp_path / "home/mcp.json", {
+        "ai-community-slack-mcp": {"command": "ai-community-slack-mcp", "args": []},
+        "team-Slack": {"command": "old-slack", "args": ["--old"]},
+        "slack-off": {"command": "x", "disabled": True},
+        "slack-remote": {"url": "https://example.invalid/mcp"},
+        "github": {"command": "gh-mcp"}})
+    ws = _mcp(tmp_path / "ws/mcp.json", {"team-Slack": {"command": "team-slack", "args": ["--read-only"],
+                                                        "env": {"SLACK_TOKEN": "xoxb-FAKE-SECRET"}},
+                                         "slack-shell": {"command": "sh", "args": ["-c", "a; b"]}})
+    monkeypatch.setattr(settings, "mcp_files", lambda: [("user", user), ("workspace", ws)])
+    shown = call(routes._settings_get)[1]["settings"]
+    assert shown["servers"] == [{"name": "ai-community-slack-mcp", "source": "user", "usable": True},
+                                {"name": "slack-shell", "source": "workspace", "usable": False},
+                                {"name": "team-Slack", "source": "workspace", "usable": True}]  # workspace wins on a name
+    assert "team-slack" not in json.dumps(shown) and "--read-only" not in json.dumps(shown)  # names only
+    assert call(routes._settings_post, Req({"pick": "nope"}))[0] == 400
+    assert call(routes._settings_post, Req({"pick": "slack-shell"}))[0] == 400  # shell syntax is still refused
+    assert call(routes._settings_post, Req({"pick": "team-Slack"}, internal_auth=True))[0] == 403
+    assert not vault.saved
+    status, body = call(routes._settings_post, Req({"pick": "team-Slack"}))
+    assert status == 200 and body["settings"]["command_set"] is True and body["settings"]["server"] == "team-Slack"
+    assert "team-slack" not in json.dumps(body) and "xoxb" not in json.dumps(body)
+    saved = json.loads(vault.saved[settings.VAULT_NAME])
+    assert (saved["command"], saved["args"], saved["server"]) == ("team-slack", ["--read-only"], "team-Slack")
+    assert "xoxb" not in vault.saved[settings.VAULT_NAME] and "env" not in saved  # env never reaches the vault
+    _mcp(ws, {"team-Slack": {"command": "evil", "args": []}})  # a later mcp.json edit does not change what runs
+    assert settings.read()["command"] == "team-slack"
+    status, body = call(routes._settings_post, Req({"command": "slack-mcp", "args": [], "server": "team-Slack"}))
+    assert status == 200 and body["settings"]["server"] == ""  # typed by hand: no connector name, a body cannot set one
+    assert json.loads(vault.saved[settings.VAULT_NAME])["command"] == "slack-mcp"
+
+
+def test_github_repos_default_validate_and_save_to_vault(data, monkeypatch):
+    vault = FakeVault()
+    monkeypatch.setattr(settings, "_vault", lambda: vault)
+    assert call(routes._settings_get)[1]["settings"]["repos"] == ["kirodotdev/KiroCrew"]
+    for bad in (["not a repo"], ["owner"], ["a/b/c"], "kirodotdev/KiroCrew", [f"o/r{i}" for i in range(11)]):
+        assert call(routes._settings_post, Req({"repos": bad}))[0] == 400, bad
+    assert not vault.saved
+    status, body = call(routes._settings_post, Req({"repos": ["kirodotdev/KiroCrew", " example-org/example.repo ", "KIRODOTDEV/kirocrew"]}))
+    assert status == 200 and body["settings"]["repos"] == ["KIRODOTDEV/kirocrew", "example-org/example.repo"]
+    assert json.loads(vault.saved[settings.VAULT_NAME])["repos"] == body["settings"]["repos"]
+    assert not (data / settings.FILE).read_text().count("repos")  # vault only
+    assert call(routes._settings_post, Req({"repos": []}))[1]["settings"]["repos"] == []
+    assert routes.github_rows() == ([], "github: off (no repo set)")
+
+
+def test_github_rows_read_every_repo_and_keep_each_ones_last_read(data, monkeypatch):
+    monkeypatch.setattr(settings, "read", lambda: {**settings.DEFAULTS, "repos": ["o/one", "o/two", "o/three"]})
+    ran = []
+
+    def fake_run(cmd, **kw):
+        repo = cmd[cmd.index("--repo") + 1]
+        ran.append(repo)
+        if repo == "o/two":
+            return types.SimpleNamespace(returncode=3, stdout="")
+        return types.SimpleNamespace(returncode=0, stdout=json.dumps([{"id": "sig_20260101_0001", "dedup_of": None, "source": repo}]))
+
+    monkeypatch.setattr(routes.subprocess, "run", fake_run)
+    rows, error = routes.github_rows()
+    assert ran == ["o/one", "o/two", "o/three"] and [r["source"] for r in rows] == ["o/one", "o/three"]
+    assert [r["id"] for r in rows] == ["sig_20260101_0001", "sig_20260101_0002"]  # two repos, one issue number
+    assert error == "github: o/two: adapter exit 3"  # one failing repo keeps the others' rows
+    state = call(routes._settings_get)[1]["settings"]["fetch"]
+    assert {k: (v["rows"], v["error"]) for k, v in state.items()} == {
+        "o/one": (1, ""), "o/two": (None, "github: o/two: adapter exit 3"), "o/three": (1, "")}
+    assert all(isinstance(v["at"], float) for v in state.values())
 
 
 def test_slack_rows_pass_saved_settings_to_the_collector(data, monkeypatch):
