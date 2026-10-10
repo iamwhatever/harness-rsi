@@ -12,6 +12,7 @@ import { HarnessRsiV2, isUxV2 } from './v2.mjs'
 import { Home } from './home.mjs'
 import { Needs } from './needs.mjs'
 import { Work } from './work.mjs'
+import { useSrcB } from './srcb.mjs'
 
 const { History, Radio, Users } = Lucide
 const BASE = '/api/apps/harness-rsi'
@@ -45,6 +46,11 @@ export function backendSource(api) {
     // The owner's Dispatch button: { results: one per id, dispatches: every card's current row }.
     dispatchCards: (ids) => api.post(`${BASE}/dispatch/start`, { proposal_ids: ids }),
     team: async () => (await api.get(`${BASE}/team`)).team,
+    // The web side (backend/report.py): the latest catch-up report with its job, the owner's topics.
+    report: async () => { const r = await api.get(`${BASE}/report`); return { report: r.report, job: r.job } },
+    makeReport: async () => ({ job: (await api.post(`${BASE}/report/make`, {})).job }),
+    topics: async () => (await api.get(`${BASE}/topics`)).topics,
+    saveTopics: async (body) => (await api.post(`${BASE}/topics`, body)).topics,
   }
 }
 
@@ -320,6 +326,7 @@ export function HarnessRsi({ src, demo = false }) {
   const [round, setRound] = usePolled(src.round, isRunning, () => { reload(); readSched() })
   const [regress] = usePolled(src.regress, () => false)
   const [armed, setArmed] = useState(false)
+  const web = useSrcB(src)
   const [[form, formNote], setForm] = useState([null, ''])
   useEffect(() => { src.settings().then((v) => setForm([toForm(v), '']), (e) => setForm([null, why(e)])) }, [src])
   useEffect(() => { readSched() }, [readSched])
@@ -363,13 +370,14 @@ export function HarnessRsi({ src, demo = false }) {
   const pending = (data?.proposals || []).filter((p) => !p.decision).length
   const panels = {
     home: () => [h(Home, { key: 'home', round, sched, settings: form?.saved, job, disp, signals: data.signals, changes: changes || [], readAt,
-      go: setTab, armed, setArmed, runRound, refresh, regress, team, scoreLine: scoreJobText(out?.score) })],
+      go: setTab, armed, setArmed, runRound, refresh, regress, team, scoreLine: scoreJobText(out?.score), catchUp: web.card })],
     needs: () => [h(Needs, { key: 'needs', proposals: data.proposals, signals: data.signals, out, disp, changes, team, sched, readAt, results, onDecide: decide, onDispatch: dispatchCards, onPrompt: decidePrompt })],
     work: () => [h(Work, { key: 'w', proposals: data.proposals, out, team, onScore: score, scoreBusy: scoreRunning(out), scoreLine: scoreJobText(out?.score) })],
     settings: () => [form ? h(SettingsForm, { key: 'f', form, note: formNote, onSave: save, onChange: (f) => setForm([f, '']) }) : lines(formNote),
       form && Array.isArray(form.saved.repos) ? h(GithubForm, { key: 'g', form, note: formNote, onSave: save, onChange: (f) => setForm([f, '']) }) : null,
       sched ? h(ScheduleForm, { key: 's', conf: sched.schedule, note: schedNote, onSave: saveSched, onChange: (c) => setSched([{ ...sched, schedule: c }, '']) }) : null,
-      disp ? h(DispatchForm, { key: 'd', conf: disp, note: dispNote, onSave: saveDisp, onChange: (c) => setDisp([c, '']) }) : null],
+      disp ? h(DispatchForm, { key: 'd', conf: disp, note: dispNote, onSave: saveDisp, onChange: (c) => setDisp([c, '']) }) : null,
+      web.settings],
   }
   const body = error ? h(UI.ErrorNotice, { title: t('loadFailed'), message: error, testId: 'load-error' })
     : !data ? h(UI.ContentSkeleton, { rows: 4 }) : stack(...panels[tab]())

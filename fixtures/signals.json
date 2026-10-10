@@ -98,5 +98,25 @@
     "layer": "real",
     "testable": {"ok": true, "task": "Tokens per turn on a 50-turn thread stay under a threshold"},
     "dedup_of": null
+  },
+  {
+    "id": "sig_20260101_0011",
+    "source": "trend:github:example-org/fast-agent",
+    "links": ["https://github.com/example-org/fast-agent"],
+    "pain": "Fast-rising coding agent repo example-org/fast-agent: 900 stars in 12 days",
+    "mentions": {"count": 900, "people": 1, "window_days": 12},
+    "layer": "external",
+    "testable": {"ok": false, "task": null},
+    "dedup_of": null
+  },
+  {
+    "id": "sig_20260101_0012",
+    "source": "trend:github:example-org/fast-agent",
+    "links": ["https://github.com/example-org/fast-agent/releases/tag/v0.2.0"],
+    "pain": "example-org/fast-agent shipped release v0.2.0",
+    "mentions": {"count": 1, "people": 1, "window_days": 3},
+    "layer": "external",
+    "testable": {"ok": false, "task": null},
+    "dedup_of": null
   }
 ]

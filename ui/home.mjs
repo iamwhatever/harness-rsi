@@ -79,7 +79,7 @@ function RawAb({ change: c }) {
 }
 
 /** The Home tab body. ``readAt`` is when the page last read the routes that carry no time of their own. */
-export function Home({ round, sched, settings, job, disp, signals = [], changes = [], readAt, go, armed, setArmed, runRound, refresh, regress, team, scoreLine }) {
+export function Home({ round, sched, settings, job, disp, signals = [], changes = [], readAt, go, armed, setArmed, runRound, refresh, regress, team, scoreLine, catchUp }) {
   const conf = sched?.schedule
   const list = checklist({ settings, sched, job, disp, round, signals, readAt })
   const steps = list.filter((x) => x.ok !== null)
@@ -95,6 +95,7 @@ export function Home({ round, sched, settings, job, disp, signals = [], changes 
       h('div', { 'data-testid': 'home-next' }, conf ? nextLine(sched) : t('home_unread'), ' ', h(Src, { route: '/schedule', when: sched?.read_at })),
       conf ? row(...['round_enabled', 'regress_enabled', 'score_enabled'].map((k) => h(UI.Badge, { key: k, 'data-testid': 'home-switch', 'data-on': !!conf[k],
         variant: conf[k] ? 'ok' : 'muted' }, t(`home_sw_${k}`, { on: t(conf[k] ? 'home_on' : 'home_off') })))) : null),
+    catchUp || null,
     h(UI.Card, { 'data-testid': 'home-setup' }, h('div', { className: LABEL }, t('home_setupTitle', { done: steps.filter((x) => x.ok).length, n: steps.length })),
       h('ul', { className: 'list-none m-0 p-0' }, list.map((x) => h('li', { key: x.key, 'data-testid': 'setup-step', 'data-key': x.key, 'data-ok': String(x.ok), className: 'py-1.5' },
         row(stepBadge(x), h('span', { className: 'text-text-strong' }, t(`home_step_${x.key}`)), h(Src, { route: x.route, when: x.when }),

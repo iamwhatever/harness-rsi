@@ -1,0 +1,100 @@
+{
+ "date": "2026-01-06",
+ "made_at": "2026-01-06T09:00:00+00:00",
+ "how": "round",
+ "round": 4,
+ "topics": [
+  "coding agent",
+  "MCP",
+  "agent harness"
+ ],
+ "trends": [
+  {
+   "id": "sig_20260101_0009",
+   "pain": "Users like a visible task progress bar",
+   "link": "https://example.com/fake/trend/9",
+   "source": "trend:example-forum",
+   "people": 6,
+   "count": 6,
+   "kind": "web",
+   "card": null
+  },
+  {
+   "id": "sig_20260101_0005",
+   "pain": "First reply feels slow",
+   "link": "https://example.com/fake/trend/5",
+   "source": "trend:example-blog",
+   "people": 4,
+   "count": 5,
+   "kind": "web",
+   "card": null
+  },
+  {
+   "id": "sig_20260101_0004",
+   "pain": "Competitor offers one-step undo of file edits",
+   "link": "https://example.com/fake/trend/4",
+   "source": "trend:example-competitor-changelog",
+   "people": 3,
+   "count": 3,
+   "kind": "web",
+   "card": {
+    "id": "prop_one_step_undo",
+    "pain": "No one-step undo of file edits"
+   }
+  },
+  {
+   "id": "sig_20260101_0011",
+   "pain": "Fast-rising coding agent repo example-org/fast-agent: 900 stars in 12 days",
+   "link": "https://github.com/example-org/fast-agent",
+   "source": "trend:github:example-org/fast-agent",
+   "people": 1,
+   "count": 900,
+   "kind": "repo",
+   "card": null
+  },
+  {
+   "id": "sig_20260101_0012",
+   "pain": "example-org/fast-agent shipped release v0.2.0",
+   "link": "https://github.com/example-org/fast-agent/releases/tag/v0.2.0",
+   "source": "trend:github:example-org/fast-agent",
+   "people": 1,
+   "count": 1,
+   "kind": "release",
+   "card": null
+  }
+ ],
+ "repos": [
+  {
+   "id": "sig_20260101_0011",
+   "pain": "Fast-rising coding agent repo example-org/fast-agent: 900 stars in 12 days",
+   "link": "https://github.com/example-org/fast-agent",
+   "source": "trend:github:example-org/fast-agent",
+   "people": 1,
+   "count": 900,
+   "kind": "repo",
+   "card": null
+  }
+ ],
+ "releases": [
+  {
+   "id": "sig_20260101_0012",
+   "pain": "example-org/fast-agent shipped release v0.2.0",
+   "link": "https://github.com/example-org/fast-agent/releases/tag/v0.2.0",
+   "source": "trend:github:example-org/fast-agent",
+   "people": 1,
+   "count": 1,
+   "kind": "release",
+   "card": null
+  }
+ ],
+ "not_reachable": [
+  "https://example.com/fake/paywalled/1"
+ ],
+ "counts": {
+  "external": 5,
+  "web": 3,
+  "repos": 1
+ },
+ "markdown": "# Industry catch-up, 2026-01-06\n\nMade 2026-01-06T09:00:00+00:00 by round 4. Topics: coding agent, MCP, agent harness.\nFrom 5 external signal(s): 3 web page(s), 1 rising repo(s).\n\n## Top 5 trends\n\n1. Users like a visible task progress bar (6 people, 6 mentions) <https://example.com/fake/trend/9>\n2. First reply feels slow (4 people, 5 mentions) <https://example.com/fake/trend/5>\n3. Competitor offers one-step undo of file edits (3 people, 3 mentions) <https://example.com/fake/trend/4>\n4. Fast-rising coding agent repo example-org/fast-agent: 900 stars in 12 days (1 people, 900 mentions) <https://github.com/example-org/fast-agent>\n5. example-org/fast-agent shipped release v0.2.0 (1 people, 1 mentions) <https://github.com/example-org/fast-agent/releases/tag/v0.2.0>\n\n## New repos and releases\n\n- Fast-rising coding agent repo example-org/fast-agent: 900 stars in 12 days <https://github.com/example-org/fast-agent>\n- example-org/fast-agent shipped release v0.2.0 <https://github.com/example-org/fast-agent/releases/tag/v0.2.0>\n\n## What it may mean for us\n\n- Users like a visible task progress bar: no card picks this up yet; the next round's reviewers weigh it.\n- First reply feels slow: no card picks this up yet; the next round's reviewers weigh it.\n- Competitor offers one-step undo of file edits: card prop_one_step_undo picks this up: No one-step undo of file edits.\n- Fast-rising coding agent repo example-org/fast-agent: 900 stars in 12 days: no card picks this up yet; the next round's reviewers weigh it.\n- example-org/fast-agent shipped release v0.2.0: no card picks this up yet; the next round's reviewers weigh it.\n\n## Not reachable (login or paywall)\n\n- <https://example.com/fake/paywalled/1>\n\n## Links\n\n- <https://example.com/fake/trend/9>\n- <https://example.com/fake/trend/5>\n- <https://example.com/fake/trend/4>\n- <https://github.com/example-org/fast-agent>\n- <https://github.com/example-org/fast-agent/releases/tag/v0.2.0>\n",
+ "slack": "Industry catch-up, 2026-01-06 (coding agent, MCP, agent harness)\n1. Users like a visible task progress bar https://example.com/fake/trend/9\n2. First reply feels slow https://example.com/fake/trend/5\n3. Competitor offers one-step undo of file edits https://example.com/fake/trend/4\n4. Fast-rising coding agent repo example-org/fast-agent: 900 stars in 12 days https://github.com/example-org/fast-agent\n5. example-org/fast-agent shipped release v0.2.0 https://github.com/example-org/fast-agent/releases/tag/v0.2.0\nNew repos: Fast-rising coding agent repo example-org/fast-agent: 900 stars in 12 days https://github.com/example-org/fast-agent\nReleases: example-org/fast-agent shipped release v0.2.0 https://github.com/example-org/fast-agent/releases/tag/v0.2.0"
+}

@@ -19,6 +19,8 @@ records the owner's choice, and 做 applies the change (``backend.prompt_changes
 proposal card opens one worker chat for it. ``POST /dispatch/start`` is the owner's Dispatch button: it
 opens those chats for chosen 做 cards whether auto-dispatch is on or off. A prompt-change card never dispatches.
 ``GET /team`` folds the lead's and lanes' self-reported work-ledger snapshots (``backend.team``).
+The web side (``backend.report``): ``GET /report`` and the owner's ``POST /report/make`` (the weekly catch-up
+report), ``GET``/``POST /topics`` (topics, trusted sites, X handles); rising repos are a round source too.
 No timer in the gateway; loading the routes seals the data dir once (``judge.seal.migrate``, idempotent).
 """
 
@@ -41,7 +43,7 @@ except ImportError:  # tests and the CLI import ``backend`` as a top-level packa
     import adapters.slack
     from adapters.github_issues.adapter import distinct_ids
 
-from . import dispatch, ledger, outcome_checks, prompt_changes, round_job, schedule, settings, store, team
+from . import dispatch, ledger, outcome_checks, prompt_changes, report, round_job, schedule, settings, store, team
 from .ledger import seal
 
 APP_NAME = "harness-rsi"
@@ -137,7 +139,7 @@ def session_rows():
 
 def round_sources():
     """The round's collectors, looked up when the round runs: GitHub, Slack, the owner's sessions."""
-    return [lambda: github_rows(), lambda: slack_rows(), lambda: session_rows()]
+    return [lambda: report.trending_rows(), lambda: github_rows(), lambda: slack_rows(), lambda: session_rows()]
 
 
 async def _settings_get(request, ctx):
@@ -435,4 +437,4 @@ def register_routes(ctx):
         AppRoute(method="GET", path="/prompt-changes", handler=_prompt_changes),
         AppRoute(method="POST", path="/prompt-changes/decide", handler=_prompt_decide),
         AppRoute(method="GET", path="/team", handler=_team),
-    ]
+    ] + report.routes(AppRoute, _owner, _err, _save)  # /report, /report/make, /topics (the web side)

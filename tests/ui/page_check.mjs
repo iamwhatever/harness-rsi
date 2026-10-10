@@ -8,7 +8,7 @@ import Page, { HarnessRsi, TABS } from './ui/index.mjs'
 import { checklist, lastRound, nextLine, roundCost } from './ui/home.mjs'
 import { leftToday, needsQueue } from './ui/needs.mjs'
 import { TABLE, setLang } from './ui/strings.mjs'
-import { demoSource, promptChange, team } from './ui/fake-data.mjs'
+import { demoSource, promptChange, report, team } from './ui/fake-data.mjs'
 
 const fixture = (f) => JSON.parse(fs.readFileSync(`fixtures/${f}.json`, 'utf8'))
 const [proposals, signals, outcomes] = ['proposals', 'signals', 'outcomes'].map(fixture)
@@ -71,6 +71,24 @@ assert.ok(all(byTest(demo.needs, 'need-diff')).some((n) => n.type === 'pre' && n
 assert.equal(byTest(demo.settings, 'slack-configured').length, 1)
 assert.ok(all(demo.settings).some((n) => n.type === 'option' && n.props.value === 'example-slack-mcp'), 'the Slack connector found in mcp.json is offered')
 assert.deepEqual(byTest(demo.settings, 'gh-repo').map((n) => n.props['data-repo']), ['example-org/example-repo'])
+// The web side: Home shows the latest catch-up report with its source and time; Settings holds topics, sites, X accounts.
+{
+  const card = byTest(demo.home, 'home-report')
+  assert.equal(card.length, 1, 'Home shows the catch-up report')
+  assert.ok(all(card).some((n) => n.props['data-testid'] === 'src' && n.props['data-route'] === '/report'), 'the report names its source')
+  assert.deepEqual(byTest(card, 'report-trend').map((n) => n.props['data-kind']), report.trends.map((i) => i.kind))
+  assert.equal(byTest(card, 'report-trend')[0].props['data-kind'], 'web', 'web pages rank first')
+  assert.ok(byTest(card, 'report-means').some((n) => all([n]).flatMap((x) => x.children).join('').includes('prop_one_step_undo')))
+  assert.equal(byTest(card, 'report-repo').length, 2)
+  assert.equal(byTest(card, 'report-unreached').length, 1)
+  assert.equal(all(byTest(card, 'report-slack-text')).flatMap((x) => x.children).join(''), report.slack)
+  assert.ok(all(card).filter((n) => n.type === 'a').every((a) => a.props.href.startsWith('https://')))
+  assert.equal(byTest(card, 'report-make').length, 1)
+  assert.ok(!all(card).some((n) => n.props['data-primary']), 'Run round stays the one primary action')
+  const inputs = all(demo.settings).filter((n) => n.type === 'input').map((n) => n.props.name)
+  assert.deepEqual(inputs.slice(-3), ['topics', 'sites', 'x_handles'])
+  assert.equal(byTest(demo.settings, 'topics-no-login').length, 1)
+}
 const dteam = byTest(demo.home, 'details-team')
 assert.equal(dteam.length, 1, 'the Team tree is in Details')
 assert.equal(byTest(dteam, 'team-note').length, 1, 'the Team tree says the data is self-reported')
@@ -105,6 +123,9 @@ const liveHome = await __settle(page, true)
 assert.ok(byTest(liveHome, 'setup-step').every((n) => n.props['data-ok'] !== 'true'), 'an empty backend has no step done')
 assert.ok(reads.includes('/api/apps/harness-rsi/schedule'))
 assert.equal(byTest(liveHome, 'setup-refresh').length, 1, 'the GitHub step fixes itself with Refresh signals, no Signals tab')
+assert.equal(byTest(liveHome, 'report-trend').length, 0, 'an empty backend has no report, never the fixture one')
+assert.equal(byTest(liveHome, 'report-none').length, 1)
+assert.ok(reads.includes('/api/apps/harness-rsi/report') && reads.includes('/api/apps/harness-rsi/topics'))
 const live = await tabTo(page, liveHome, 'needs')
 assert.equal(byTest(live, 'demo-note').length, 0)
 assert.equal(byTest(live, 'need-item').length, 0)
@@ -127,7 +148,7 @@ const collect = (v, k) => {
   else if (v && typeof v === 'object') for (const [kk, x] of Object.entries(v)) collect(x, Array.isArray(v) ? null : kk)
 }
 const src = demoSource()
-collect([proposals, signals, outcomes, promptChange, team, await src.settings(), await src.dispatchConf(), await src.schedule()])
+collect([proposals, signals, outcomes, promptChange, team, report, await src.topics(), await src.settings(), await src.dispatchConf(), await src.schedule()])
 const dataByLength = [...data].filter((x) => x.length > 1).sort((a, b) => b.length - a.length)
 const ATTRS = ['aria-label', 'alt', 'placeholder', 'title']
 // Text in <code> (routes, script and metric names) is an identifier, not prose.

@@ -111,6 +111,21 @@ def _facts_block(facts: str) -> str:
     return "Facts about the exam checkout (read from it, trusted):\n" + facts if facts else ""
 
 
+NOT_REACHABLE = "NOT REACHABLE:"
+
+
+def not_reachable(text: str) -> list[str]:
+    """The https pages the scout's ``NOT REACHABLE:`` lines name (login, paywall), in order, once each."""
+    urls = [u.strip().rstrip(".,;") for line in text.splitlines() if line.strip().upper().startswith(NOT_REACHABLE)
+            for u in line.split(":", 1)[1].replace(",", " ").split()]
+    return list(dict.fromkeys(u for u in urls if u.startswith("https://") and len(u) <= 500))[:50]
+
+
+def scout_message(day: str, brief: str = "") -> str:
+    """The trend scout's task: today, the owner's topics, sites and X accounts (``backend.topics.brief``)."""
+    return f"Today is {day}. Scan now and reply with the JSON array.\n" + brief + _schema("signal")
+
+
 def setter_message(signals: list[dict], rnd: int, facts: str = "") -> str:
     return (f"Round: {rnd}\n" + _signals_block(signals) + _facts_block(facts) + _schema("exam")
             + "Reply with ONLY the JSON array of exam rows.")
@@ -305,10 +320,13 @@ def render_mock(p: dict, exams: list[dict], prior: dict | None = None) -> str:
 def run_round(*, agent: Agent, collectors: list[Callable[[], list[dict]]], save_mock: Saver,
               data: Path, rnd: int, day: str, check_exam: Checker | None = None,
               prior: Prior | None = None, bank: Path | None = None, classify_bank: Classifier | None = None,
-              facts: Facts | None = None) -> dict:
+              facts: Facts | None = None, scout_brief: str = "") -> dict:
     batches = [c() for c in collectors]
-    batches += [parse_rows(agent(name, f"Today is {day}. Scan now and reply with the JSON array.\n" + _schema("signal")))
-                for name in (SCANNER, SCOUT)]
+    batches.append(parse_rows(agent(SCANNER, f"Today is {day}. Scan now and reply with the JSON array.\n" + _schema("signal"))))
+    scout = agent(SCOUT, scout_message(day, scout_brief))
+    batches.append(parse_rows(scout))
+    unreachable = not_reachable(scout)
+    (data / "web_reach.json").write_text(json.dumps({"day": day, "not_reachable": unreachable}, indent=1) + "\n")
     signals, _ = enrich.enrich(merge_signals(batches, day))  # Slack tasks + cross-source heat
     refused: list[dict] = []
     exams = write_exams(agent, signals, rnd, check_exam, refused,  # before the debate: no proposal can exist yet
@@ -332,7 +350,7 @@ def run_round(*, agent: Agent, collectors: list[Callable[[], list[dict]]], save_
     used = prompts.versions(prompts.effective(data))  # which prompt text each agent ran
     (data / "prompt_versions.json").write_text(json.dumps(used, indent=1) + "\n")
     out = {"signals": signals, "exams": exams, "proposals": props, "refused_exams": refused,
-           "dropped_prior_art": dropped, "prompt_versions": used}
+           "dropped_prior_art": dropped, "prompt_versions": used, "not_reachable": unreachable}
     if bank and classify_bank:  # the round ends: its exams join the shared bank, validated
         out["published"] = publish_round(data, bank, classify_bank)
     return out
@@ -401,6 +419,18 @@ def slack_collector(command: str | None) -> Callable[[], list[dict]]:
     return collect
 
 
+def trending_collector(topics: list[str]) -> Callable[[], list[dict]]:
+    """Fast-rising repos for the topics (``adapters.trending``), deterministic; [] when GitHub is out of reach."""
+    def collect() -> list[dict]:
+        sys.path.insert(0, str(ROOT))
+        from adapters import trending
+        rows, notes = trending.collect(topics)
+        for n in notes:
+            print(n, file=sys.stderr)
+        return rows
+    return collect
+
+
 def session_collector(days: int = 14) -> Callable[[], list[dict]]:
     """The owner's own sessions through the miner's pain detectors: signals without an agent turn."""
     def collect() -> list[dict]:
@@ -449,13 +479,15 @@ def main(argv: list[str]) -> int:
         return 0
     data = Path(os.environ.get("HARNESS_RSI_DATA", Path.home() / ".kiro/crew/harness-rsi-data"))
     replies = dict(r.split("=", 1) for r in args.reply)
+    from backend import topics  # the owner's topics; the defaults under a bare CLI (no vault)
+    web = topics.read()
     result = run_round(agent=kiro_agent(data / ".run", replies), save_mock=mock_saver(data / "mocks"),
-                       collectors=[github_collector(args.repo, args.github_json), slack_collector(args.slack_mcp),
-                                   session_collector()],
+                       collectors=[trending_collector(web["topics"]), github_collector(args.repo, args.github_json),
+                                   slack_collector(args.slack_mcp), session_collector()],
                        data=data, rnd=args.round, day=dt.date.today().strftime("%Y%m%d"),
                        check_exam=validate_checker(args.exam_workdir), prior=gh_prior,
                        bank=args.bank, classify_bank=bank_classifier(args.exam_workdir),
-                       facts=setter_facts(args.exam_workdir, args.bank))
+                       facts=setter_facts(args.exam_workdir, args.bank), scout_brief=topics.brief(web))
     published, used = result.pop("published", {}), result.pop("prompt_versions")
     print(json.dumps({**{k: len(v) for k, v in result.items()}, **{k: v for k, v in published.items() if k != "notes"},
                       "prompt_versions": used}))

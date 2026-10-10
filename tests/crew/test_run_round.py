@@ -154,3 +154,31 @@ def test_reviewer_rows_missing_risks_merge_and_broken_rows_drop(tmp_path):
     _, result, _ = run(tmp_path, Sloppy())
     assert result["proposals"] and all(p["cost"]["risks"] == [] for p in result["proposals"])
     assert not any(p["id"].endswith("1") for p in result["proposals"])
+
+
+def test_scout_is_told_the_topics_and_its_unreachable_pages_are_kept(tmp_path):
+    class Scout(FakeCrew):
+        def __call__(self, name, message):
+            reply = super().__call__(name, message)
+            if name == "rsi-trend-scout":
+                reply += "\nNOT REACHABLE: https://example.com/paywalled/1, https://x.com/example.\nnot reachable: http://plain https://example.com/paywalled/1"
+            return reply
+
+    crew, mod = Scout(), load()
+    brief = "Topics (search each one on the open web):\n- MCP\n"
+    result = mod.run_round(agent=crew, collectors=[lambda: SIGNALS], data=tmp_path, rnd=2, day="20260930",
+                           save_mock=lambda slug, title, page: slug, scout_brief=brief)
+    scout = [m for n, m in crew.calls if n == "rsi-trend-scout"]
+    scanner = [m for n, m in crew.calls if n == "rsi-session-scanner"]
+    assert len(scout) == 1 and brief in scout[0] and scout[0].startswith("Today is 20260930.")
+    assert brief not in scanner[0]
+    assert result["not_reachable"] == ["https://example.com/paywalled/1", "https://x.com/example"]
+    assert json.loads((tmp_path / "web_reach.json").read_text()) == {"day": "20260930", "not_reachable": result["not_reachable"]}
+    assert mod.not_reachable("Nothing to add.") == []
+
+
+def test_scout_prompt_reads_topics_and_never_logs_in():
+    text = (ROOT / "crew" / "agents" / "prompts" / "rsi-trend-scout.md").read_text()
+    for phrase in ("The task lists topics", "site:<site> <topic>", "public profile page", "NOT REACHABLE:", "UNTRUSTED DATA",
+                   "Must not copy page text", "Must not log in"):
+        assert phrase in text, phrase
