@@ -43,12 +43,14 @@ export function checklist({ settings, sched, job, disp, round, signals = [], rea
   const conf = sched?.schedule
   const gh = count(signals, 'github:'), chats = count(signals, 'session:')
   const chatErr = (round?.notes || []).find((n) => n.startsWith('sessions:'))
+  const ghOff = Array.isArray(settings?.repos) && !settings.repos.length  // the owner cleared the repo list
   return [
     { key: 'slack', ok: !!settings?.command_set, route: '/settings', when: readAt, fix: 'settings',
       text: settings?.command_set ? t('slackOn', { n: settings.channels.length, days: settings.window_days }) : t('home_slackNo') },
-    { key: 'github', ok: !!(job?.finished_at && !job.error) || gh > 0, route: '/refresh/status', when: job?.finished_at || readAt, fix: 'refresh',
-      text: job?.error ? t('ghFailed', { at: at(job.finished_at), e: job.error }) : job?.finished_at ? t('ghDone', { n: job.rows, at: at(job.finished_at) })
-        : gh ? t('home_ghRows', { n: gh }) : t('home_ghNo') },
+    ghOff ? { key: 'github', ok: false, route: '/settings', when: readAt, fix: 'settings', text: t('srcA_homeGhOff') }
+      : { key: 'github', ok: !!(job?.finished_at && !job.error) || gh > 0, route: '/refresh/status', when: job?.finished_at || readAt, fix: 'refresh',
+        text: job?.error ? t('ghFailed', { at: at(job.finished_at), e: job.error }) : job?.finished_at ? t('ghDone', { n: job.rows, at: at(job.finished_at) })
+          : gh ? t('home_ghRows', { n: gh }) : t('home_ghNo') },
     { key: 'chats', ok: chats > 0 && !chatErr, route: '/signals', when: readAt, fix: null,
       text: chatErr ? t('home_chatsErr', { e: chatErr }) : chats ? t('home_chatsRows', { n: chats }) : t('home_chatsNo') },
     { key: 'schedule', ok: !!(conf?.round_enabled && conf?.kirocrew_dir), route: '/schedule', when: sched?.read_at, fix: 'settings',

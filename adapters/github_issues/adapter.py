@@ -23,7 +23,10 @@ import re
 import subprocess
 import sys
 
-DEFAULT_REPO = "kirodotdev/KiroCrew"
+#: The repos read when none are named: the Settings tab's list (``backend.settings``) starts from this.
+DEFAULT_REPOS = ("kirodotdev/KiroCrew",)
+#: ``owner/name`` as GitHub allows them.
+REPO_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})/[A-Za-z0-9._-]{1,100}$")
 DEFAULT_WINDOW_DAYS = 14
 DEFAULT_MIN_REMAINING = 200
 DEDUP_RATIO = 0.85
@@ -213,6 +216,22 @@ def rows_from_cache(repo, cache, window_start, window_days):
     return rows
 
 
+def distinct_ids(rows, taken):
+    """``rows`` (one repo's) with every id ``taken`` (by another repo's rows) swapped for a free one.
+
+    Ids come from an issue's date and number, so two repos can mint the same one; ``dedup_of``
+    follows the swap and ``taken`` gains the ids used.
+    """
+    remap = {}
+    for r in rows:
+        sid = r["id"]
+        if sid in taken:
+            sid = next(c for c in (f"sig_{sid[4:12]}_{n:04d}" for n in range(1, 10000)) if c not in taken)
+        remap[r["id"]] = sid
+        taken.add(sid)
+    return [{**r, "id": remap[r["id"]], "dedup_of": remap.get(r["dedup_of"], r["dedup_of"])} for r in rows]
+
+
 def build_signals(repo, fetch, window_days=DEFAULT_WINDOW_DAYS, now=None, cache_dir=None,
                   full=False, min_remaining=DEFAULT_MIN_REMAINING, stats=None, budget=None):
     """Read issues through ``fetch(repo, since, states, after)`` (see gh_fetch) and return signal rows.
@@ -239,22 +258,26 @@ def build_signals(repo, fetch, window_days=DEFAULT_WINDOW_DAYS, now=None, cache_
 
 def main(argv=None, fetch=gh_fetch, out=sys.stdout, err=sys.stderr, now=None, budget=gh_budget):
     ap = argparse.ArgumentParser(description="Emit signal rows from GitHub issues.")
-    ap.add_argument("--repo", default=DEFAULT_REPO, help="owner/name")
+    ap.add_argument("--repo", action="append", help="owner/name; repeat to read several (default: %s)" % ", ".join(DEFAULT_REPOS))
     ap.add_argument("--window-days", type=int, default=DEFAULT_WINDOW_DAYS)
     ap.add_argument("--full", action="store_true", help="ignore the cursor and rebuild the cache")
     ap.add_argument("--min-remaining", type=int, default=DEFAULT_MIN_REMAINING, help="stop below this many API points left")
     ap.add_argument("--cache-dir", default=None, help="default: $HARNESS_RSI_DATA/cache/github_issues")
     args = ap.parse_args(argv)
-    if args.window_days < 1 or not re.fullmatch(r"[\w.-]+/[\w.-]+", args.repo):
+    repos = list(dict.fromkeys(args.repo or DEFAULT_REPOS))
+    if args.window_days < 1 or not all(REPO_RE.match(r) for r in repos):
         ap.error("need --repo owner/name and --window-days >= 1")
-    stats = {}
+    rows, calls, stats, taken = [], 0, {}, set()
     try:
-        rows = build_signals(args.repo, fetch, args.window_days, now=now, cache_dir=args.cache_dir or default_cache_dir(),
-                             full=args.full, min_remaining=args.min_remaining, stats=stats, budget=budget)
+        for repo in repos:
+            stats["repo"] = repo
+            rows += distinct_ids(build_signals(repo, fetch, args.window_days, now=now, cache_dir=args.cache_dir or default_cache_dir(),
+                                  full=args.full, min_remaining=args.min_remaining, stats=stats, budget=budget), taken)
+            calls += stats["calls"]
     except RateLimitLow as exc:
-        err.write(f"github_issues: stopped, {exc}. Cache and cursor unchanged; try again after the limit resets.\n")
+        err.write(f"github_issues: stopped at {stats['repo']}, {exc}. Its cache and cursor are unchanged; try again after the limit resets.\n")
         return 3
     json.dump(rows, out, indent=2, ensure_ascii=False)
     out.write("\n")
-    err.write(f"github_issues: {len(rows)} rows, {stats['calls']} API calls, {stats['remaining']} left\n")
+    err.write(f"github_issues: {len(rows)} rows, {calls} API calls, {stats['remaining']} left\n")
     return 0

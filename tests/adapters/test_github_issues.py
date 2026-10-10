@@ -119,6 +119,25 @@ def run(fake, tmp_path, now=NOW, **kw):
     return adapter.build_signals(REPO, fake, 14, now=now, cache_dir=tmp_path / "cache", **kw)
 
 
+def test_several_repos_are_read_in_one_run_and_default_is_kirocrew():
+    seen = []
+
+    def fetch(repo, since, states, after):
+        seen.append(repo)
+        return fake_fetch(REPO, since, states, after)
+
+    buf = io.StringIO()
+    assert adapter.main(["--repo", REPO, "--repo", "o/two", "--repo", REPO], fetch=fetch, out=buf, now=NOW, budget=None) == 0
+    got = json.loads(buf.getvalue())
+    assert sorted(set(seen)) == [REPO, "o/two"] and {r["source"] for r in got} == {f"github:{REPO}", "github:o/two"}
+    assert len(got) == 2 * len(rows()) and len({r["id"] for r in got}) == len(got)  # same numbers, distinct ids
+    two = [r for r in got if r["source"] == "github:o/two"]
+    assert {r["dedup_of"] for r in two} - {None} <= {r["id"] for r in two}  # a swapped id is followed
+    seen.clear()
+    assert adapter.main([], fetch=fetch, out=io.StringIO(), now=NOW, budget=None) == 0
+    assert set(seen) == {"kirodotdev/KiroCrew"} and adapter.DEFAULT_REPOS == ("kirodotdev/KiroCrew",)
+
+
 def test_second_run_without_changes_makes_at_most_two_calls(tmp_path):
     fake = Recorder()
     first = run(fake, tmp_path)
